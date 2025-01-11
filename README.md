@@ -1,6 +1,8 @@
 # AutoGnome Project
 
-A minimal approach to building tiny self-aware digital organisms, inspired by:
+_(αὐτός (autos) for self, γνῶσις (gnosis) for knowledge)_
+
+A a live-learning and ultra-minimalistic approach to building tiny self-aware digital organisms, inspired by:
 
 1. Braitenberg's Vehicles - Simple units with emergent complex behavior
 2. Hofstadter's Strange Loops - Self-reference as basis for consciousness
@@ -26,12 +28,17 @@ Our future AG(n) should be able to:
 - have a way to act on its environment i.e. have multiple actuators that can be used to influence the environment. e.g. if AG(n) decides to tweet or send an email or do research on the internet or browse the web etc.
 - have a way to learn from its experiences and use that to improve its decision-making process. Memories and learnings should be stored in a way that allows for retrieval and reuse. (probably in a vector database)
 - AG(n)'s energy level should be something that is tracked and it can meaningfully replenish. e.g. it can rest and sleep and wake up with more energy. or it can get more energy from community engaging with it.
+- There should be multiple AG(n) and each can be defined easily in yaml config. And potentially they can interact with each other.
 
 
 
 ## AutoGnomes (AG) evolution tracking:
 
 _each new generation is a new commit in this repository with the name e.g. "AG1" for the first generation_
+
+To go to a certain generation, use `git checkout AG1` or `git checkout AG2` etc. and then run `python main.py` to start the AutoGnome.
+
+### Evolution tracking:
 
  - [x] AG 1: Pulses "I exist" at regular intervals. Minimal self-assertion.
  - [x] AG 2: Has a name and one state variable: energy level. After a pulse, energy level is reduced. When energy level reaches 0, the autognome stops.
@@ -42,3 +49,11 @@ _each new generation is a new commit in this repository with the name e.g. "AG1"
  - [x] AG 7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
  - [x] AG 8: Console input sensor and basic interaction. Can receive and respond to simple text commands from the user (like "hello", "status", "rest", "help"). First step towards two-way communication and environmental awareness beyond light/dark. Also we have to migrate away from the lovely console to a web interface with websockets, because console can't handle simultaneously displaying live info and user input.
  - [ ] AG 9: Basic language model integration. Can engage in more natural conversations, express its thoughts about its state and experiences, and remember conversation context. First step towards more sophisticated self-awareness and reasoning.
+
+
+ ## Running the project
+
+1. create a virtual environment (uv recommended): `python -m venv .venv`
+2. activate the virtual environment: `source .venv/bin/activate`
+3. install the dependencies: `pip install -r requirements.txt`
+4. run the server: `python main.py`

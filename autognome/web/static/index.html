@@ -130,20 +130,21 @@
 
         // WebSocket event handlers
         ws.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === 'status') {
-                    updateStatus(data.data);
+            const data = JSON.parse(event.data);
+            if (data.type === 'status') {
+                updateStatus(data.data);
+                // If this is the first status update, show a welcome message
+                if (!window.gotFirstStatus) {
+                    window.gotFirstStatus = true;
+                    addMessage(`I am ${data.data.name} (AG${data.data.identifier}), and I am awake!`);
                 }
-            } catch {
-                // If not JSON, treat as regular message
-                addMessage(event.data);
+            } else if (data.type === 'message') {
+                addMessage(data.data);
             }
         };
 
         ws.onopen = function() {
-            // Request initial status
-            ws.send('status');
+            addMessage('Connection established...', 'system');
         };
 
         ws.onclose = function() {
@@ -161,8 +162,8 @@
         };
 
         // Add light switch handler
-        document.getElementById('light-switch').addEventListener('click', async () => {
-            await ws.send('toggle_light');
+        document.getElementById('light-switch').addEventListener('click', () => {
+            ws.send('toggle_light');
         });
     </script>
 </body>

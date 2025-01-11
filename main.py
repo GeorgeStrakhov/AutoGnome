@@ -5,7 +5,9 @@ import webbrowser
 import threading
 import time
 from datetime import timedelta
-from autognome.web.server import app, get_current_autognome
+from autognome.web.server import app
+from autognome.core.loader import AutognomeLoader
+from autognome.core.autognome import Autognome
 
 def format_duration(seconds: float) -> str:
     """Format duration in seconds to a human readable string"""
@@ -64,8 +66,11 @@ def handle_shutdown(signum, frame):
     """Handle shutdown signal"""
     print("\nShutting down...")
     # Get current autognome instance
-    auto = get_current_autognome()
+    auto = app.state.current_autognome
     if auto:
+        # First stop the autognome (this will store shutdown memory)
+        auto.stop()
+        # Then display summary
         display_session_summary(auto)
         print("\nHibernation complete. Goodbye!")
     sys.exit(0)
@@ -75,7 +80,47 @@ def open_browser():
     time.sleep(1.5)  # Wait for server to start
     webbrowser.open("http://127.0.0.1:8000")
 
+def select_autognome() -> str:
+    """Interactive selection of which AG to run"""
+    loader = AutognomeLoader()
+    versions = loader.get_available_versions()
+    if not versions:
+        print("No AG versions found in data/autognomes/")
+        sys.exit(1)
+        
+    print("\nAvailable AutoGnomes:")
+    for i, version in enumerate(versions, 1):
+        config = loader.load_config(version)
+        if config:
+            print(f"\n{i}. {config.name} ({version})")
+            print(f"   {config.description.split('\n')[0]}")
+    print()
+    
+    while True:
+        try:
+            choice = input("Select an AutoGnome to run (1-%d): " % len(versions))
+            idx = int(choice) - 1
+            if 0 <= idx < len(versions):
+                selected = versions[idx]
+                print(f"\nStarting {selected}...")
+                return selected
+            else:
+                print("Invalid selection. Please try again.")
+        except ValueError:
+            print("Please enter a number.")
+
 if __name__ == "__main__":
+    # Select which AG to run
+    version = select_autognome()
+    
+    # Initialize the selected AG
+    loader = AutognomeLoader()
+    config = loader.create_instance(version)
+    if not config:
+        print(f"Failed to start {version}")
+        sys.exit(1)
+    app.state.current_autognome = Autognome(config=config)
+    
     # Set up signal handlers
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)

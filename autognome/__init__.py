@@ -1,5 +1,5 @@
 """
-AutoGnome - A minimal approach to building self-referential systems
+AutoGnome - A minimal approach to building self-aware digital organisms
 """
 
-__version__ = "0.1.0" 
+__version__ = "0.0.9" 

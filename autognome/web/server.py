@@ -1,172 +1,212 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from typing import List, Dict
+from fastapi.responses import FileResponse
 import asyncio
-import json
-import os
-
+from pathlib import Path
+from typing import Optional, Dict
 from ..core.autognome import Autognome
-from ..core.config import AutognomeConfig
-from ..display.ascii_art import get_gnome_art
+from ..core.loader import AutognomeLoader
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-# Mount static files directory
-static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+# Store current autognome instance in app state
+app.state.current_autognome: Optional[Autognome] = None
+app.state.websocket: Optional[WebSocket] = None
+app.state.ascii_art_cache: Dict[str, str] = {}  # Cache for ASCII art
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
+def load_ascii_art(art_path: str, base_dir: Path) -> str:
+    """Load ASCII art from file, using cache if available"""
+    cache_key = str(base_dir / art_path)
+    if cache_key in app.state.ascii_art_cache:
+        return app.state.ascii_art_cache[cache_key]
+        
+    try:
+        with open(base_dir / art_path) as f:
+            art = f.read()
+            app.state.ascii_art_cache[cache_key] = art
+            return art
+    except Exception as e:
+        print(f"Error loading ASCII art from {art_path}: {e}")
+        return "ERROR: Could not load ASCII art"
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+@app.get("/")
+async def get_index():
+    """Serve the index.html file"""
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+@app.get("/api/versions")
+async def get_versions():
+    """Get available AG versions"""
+    loader = AutognomeLoader()
+    versions = []
+    for version in loader.get_available_versions():
+        config = loader.load_config(version)
+        if config:
+            versions.append({
+                "id": version,
+                "name": config.name,
+                "description": config.description
+            })
+    return {"versions": versions}
 
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except:
-                pass
-
-    async def broadcast_status(self, status: Dict):
-        for connection in self.active_connections:
-            try:
-                await connection.send_json({
-                    "type": "status",
-                    "data": status
-                })
-            except:
-                pass
-
-manager = ConnectionManager()
-autognome: Autognome = None
-
-def get_current_autognome() -> Autognome:
-    """Get the current autognome instance"""
-    return autognome
-
-async def run_autognome():
-    """Run the autognome in the background"""
-    global autognome
-    
-    if not autognome:
-        autognome = Autognome(
-            identifier="8",
-            name="Echo",
-            config=AutognomeConfig(
-                initial_energy=10.0,
-                optimal_energy=7.0,
-                energy_depletion_rate=1.0,
-                energy_recovery_rate=1.0,
-                dark_fear_threshold=0.7,
-                light_confidence_boost=0.3
-            )
-        )
-    
-    while True:
-        if autognome.running:
-            message = autognome.act()
-            if message != "...":
-                await manager.broadcast(message)
-            
-            # Send status update
-            status = autognome.get_status()
-            status["ascii_art"] = get_gnome_art(
-                state=status.get("display_state", "normal"),
-                is_observing=status.get("is_observing", False)
-            )
-            await manager.broadcast_status(status)
-            
-        await asyncio.sleep(autognome.config.pulse_frequency)
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(run_autognome())
+@app.post("/api/start/{version}")
+async def start_autognome(version: str):
+    """Start a new autognome instance"""
+    loader = AutognomeLoader()
+    config = loader.create_instance(version)
+    if not config:
+        return {"error": f"Version {version} not found"}
+        
+    app.state.current_autognome = Autognome(config=config)
+    # Clear ASCII art cache on new instance
+    app.state.ascii_art_cache.clear()
+    return {"status": "ok"}
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Handle graceful shutdown"""
-    global autognome
-    if autognome and autognome.running:
-        autognome.stop()
-        # Save final state
-        autognome._save_state()
-
-@app.get("/", response_class=HTMLResponse)
-async def get_index():
-    """Serve the main page"""
-    with open(os.path.join(static_dir, "index.html")) as f:
-        return f.read()
+    if app.state.current_autognome:
+        app.state.current_autognome.stop()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """Handle WebSocket connections"""
-    await manager.connect(websocket)
+    """WebSocket endpoint for live updates"""
+    await websocket.accept()
+    app.state.websocket = websocket
+    
     try:
         while True:
-            data = await websocket.receive_text()
-            command = data.lower().strip()
-            
-            if command == "status":
-                status = autognome.get_status()
-                status["ascii_art"] = get_gnome_art(
-                    state=status.get("display_state", "normal"),
-                    is_observing=status.get("is_observing", False)
-                )
-                await websocket.send_json({
-                    "type": "status",
-                    "data": status
-                })
-            elif command == "hello":
-                await websocket.send_text(f"Hello! I am {autognome.name}, AG-{autognome.identifier}.")
-            elif command == "help":
-                help_text = """Available commands:
-• hello - Get a greeting from the autognome
-• status - Get current status
-• rest - Take a rest to recover energy
-• stats - Get detailed statistics
+            # Handle incoming messages
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                # Handle commands
+                if data == "toggle_light":
+                    # Light can be toggled even when AG is sleeping
+                    current = app.state.current_autognome._sensor.read_light_level()
+                    new_level = "dark" if current == "light" else "light"
+                    app.state.current_autognome._sensor.set_light_level(new_level)
+                    await websocket.send_json({
+                        "type": "message",
+                        "data": f"Light level changed to {new_level}."
+                    })
+                elif data == "rest":
+                    if app.state.current_autognome.running:
+                        app.state.current_autognome.start_rest()
+                    else:
+                        await websocket.send_json({
+                            "type": "message",
+                            "data": "I'm sleeping right now. Use 'wake' to wake me up first."
+                        })
+                elif data == "sleep":
+                    if app.state.current_autognome.running:
+                        app.state.current_autognome.stop()
+                        await websocket.send_json({
+                            "type": "message",
+                            "data": "Going to sleep... Goodnight!"
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "message",
+                            "data": "I'm already sleeping."
+                        })
+                elif data == "wake":
+                    if not app.state.current_autognome.running:
+                        app.state.current_autognome.running = True
+                        await websocket.send_json({
+                            "type": "message",
+                            "data": "Good morning! I'm awake now."
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "message",
+                            "data": "I'm already awake!"
+                        })
+                # Handle chat messages
+                elif data.startswith("hello"):
+                    state = "sleeping" if not app.state.current_autognome.running else "awake"
+                    await websocket.send_json({
+                        "type": "message",
+                        "data": f"Hello! I am {app.state.current_autognome.config.name}, AG-{app.state.current_autognome.config.version}. I am currently {state}."
+                    })
+                elif data == "help":
+                    help_text = """Available commands:
+• hello - Get a greeting from me
+• status - Get my current status
+• rest - Tell me to take a rest
+• toggle_light - Toggle the light level
+• sleep - Tell me to go to sleep
+• wake - Wake me up from sleep
 • help - Show this help message"""
-                await websocket.send_text(help_text)
-            elif command == "rest":
-                if not autognome.is_resting:
-                    autognome.start_rest()
-                    await websocket.send_text("Taking a moment to rest...")
-                else:
-                    await websocket.send_text("Already resting...")
-            elif command == "stats":
-                lifetime = autognome.get_lifetime_stats()
-                stats_text = f"""Lifetime Statistics:
-• Wake cycles: {lifetime['wake_count']}
-• Total runtime: {lifetime['total_runtime']:.1f}s
-• Total hibernation: {lifetime['total_hibernation_time']:.1f}s
-• Total pulses: {lifetime['total_pulses']}
-• Total rests: {lifetime['total_rests']}"""
-                await websocket.send_text(stats_text)
-            elif command == "toggle_light":
-                # Toggle the light level
-                current = autognome._sensor.read_light_level()
-                new_level = "dark" if current == "light" else "light"
-                autognome._sensor.set_light_level(new_level)
+                    await websocket.send_json({
+                        "type": "message",
+                        "data": help_text
+                    })
+                elif data == "status":
+                    energy = app.state.current_autognome.energy_level
+                    if app.state.current_autognome.running:
+                        state = "resting" if app.state.current_autognome.is_resting else "active"
+                    else:
+                        state = "sleeping"
+                    await websocket.send_json({
+                        "type": "message",
+                        "data": f"I am {state} with {energy:.1f} energy."
+                    })
+            except asyncio.TimeoutError:
+                pass  # No message received, continue with status updates
                 
-                # Send immediate status update
-                status = autognome.get_status()
-                status["ascii_art"] = get_gnome_art(
-                    state=status.get("display_state", "normal"),
-                    is_observing=status.get("is_observing", False)
-                )
+            # Send status updates
+            if app.state.current_autognome:
+                # Get base status (even when sleeping)
+                status = app.state.current_autognome.get_status()
+                
+                # Only do actions and get messages if running
+                if app.state.current_autognome.running:
+                    message = app.state.current_autognome.act()
+                    # Add message to status if it's meaningful
+                    if message and message not in ["...", "*whimper*"]:
+                        await websocket.send_json({
+                            "type": "message",
+                            "data": message
+                        })
+                
+                # Add ASCII art from files based on state
+                auto = app.state.current_autognome
+                ascii_art = auto.config.display["ascii_art"]
+                base_dir = Path("data/autognomes") / auto.config.version
+                
+                if status["is_observing"]:
+                    status["ascii_art"] = load_ascii_art(ascii_art["thinking"], base_dir)
+                else:
+                    status["ascii_art"] = load_ascii_art(ascii_art[status["emotional_state"]], base_dir)
+                    
+                # Send status update
                 await websocket.send_json({
                     "type": "status",
                     "data": status
                 })
-            else:
-                await websocket.send_text(f"Unknown command. Type 'help' for available commands.")
+            await asyncio.sleep(1)
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
-        manager.disconnect(websocket) 
+        app.state.websocket = None
+
+@app.post("/api/command/{cmd}")
+async def handle_command(cmd: str):
+    """Handle commands from the web interface"""
+    if not app.state.current_autognome:
+        return {"error": "No autognome running"}
+        
+    if cmd == "rest":
+        app.state.current_autognome.start_rest()
+    elif cmd == "sleep":
+        app.state.current_autognome.stop()
+    elif cmd == "wake":
+        app.state.current_autognome.running = True
+    elif cmd == "toggle_light":
+        # Toggle the light level in the sensor
+        current = app.state.current_autognome._sensor.read_light_level()
+        new_level = "dark" if current == "light" else "light"
+        app.state.current_autognome._sensor.set_light_level(new_level)
+        
+    return {"status": "ok"} 

@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 from pydantic import BaseModel, Field, PrivateAttr
-from .config import AutognomeConfig
+from .loader import AutognomeConfig
 from .memory import ShortTermMemory
 from ..environment.sensor import EnvironmentSensor, LightLevel
 from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
@@ -9,19 +10,9 @@ from .state_store import StateStore, JsonStateStore, PersistentState
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
-    identifier: str = Field(
-        ...,
-        min_length=1, 
-        description="Unique identifier for the autognome"
-    )
-    name: str = Field(
-        ...,
-        min_length=1,
-        description="The name of the autognome"
-    )
     config: AutognomeConfig = Field(
-        default_factory=AutognomeConfig,
-        description="Autognome configuration settings"
+        ...,
+        description="Loaded configuration for this autognome"
     )
     pulse_count: int = Field(
         default=0, 
@@ -49,13 +40,14 @@ class Autognome(BaseModel):
     
     # Private attributes not included in serialization
     _sensor: EnvironmentSensor = PrivateAttr(default_factory=EnvironmentSensor)
-    _short_term_memory: ShortTermMemory = PrivateAttr(default_factory=ShortTermMemory)
+    _short_term_memory: ShortTermMemory = PrivateAttr()
     _long_term_memory: LongTermMemoryStore = PrivateAttr()
     _state_store: StateStore = PrivateAttr()
     _last_observation: str = PrivateAttr(default="")
     _last_energy_warning: str = PrivateAttr(default=None)
     _startup_time: datetime = PrivateAttr()
     _lifetime_stats: dict = PrivateAttr()
+    _base_dir: Path = PrivateAttr()
     
     model_config = {
         "arbitrary_types_allowed": True
@@ -63,8 +55,17 @@ class Autognome(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         """Initialize after model validation"""
-        # Initialize state storage first
-        self._state_store = JsonStateStore(self.config.memory_dir)
+        # Set up base directory for this AG
+        self._base_dir = Path("data/autognomes") / self.config.version
+        
+        # Initialize memory with configured capacity
+        self._short_term_memory = ShortTermMemory(
+            capacity=self.config.memory["short_term_capacity"]
+        )
+        
+        # Initialize state storage with full paths
+        self._state_store = JsonStateStore(self._base_dir)
+        self._long_term_memory = JsonlMemoryStore(self._base_dir)
         
         # Try to load previous state
         prev_state = self._state_store.load_state()
@@ -86,7 +87,7 @@ class Autognome(BaseModel):
         else:
             # Initialize fresh state
             if self.energy_level is None:
-                self.energy_level = self.config.initial_energy
+                self.energy_level = self.config.core["initial_energy"]
             self._lifetime_stats = {
                 'total_pulses': 0,
                 'total_rests': 0,
@@ -96,13 +97,38 @@ class Autognome(BaseModel):
             }
             
         self._startup_time = datetime.now()
-        self._long_term_memory = JsonlMemoryStore(self.config.memory_dir)
         
         # Store startup event with wake count
         self._store_memory(
             "startup", 
-            f"I am {self.name}, and I have awakened for the {self._lifetime_stats['wake_count']} time!"
+            f"I am {self.config.name}, and I have awakened for the {self._lifetime_stats['wake_count']} time!"
         )
+        
+        # Save initial state
+        self._save_state()
+
+    def act(self) -> str:
+        """Perform one action cycle based on current state"""
+        action = self.decide_action()
+        result = self.pulse() if action == "pulse" else self.rest()
+        
+        # Check for significant energy states
+        should_warn, warning_type = self._should_warn_energy()
+        if should_warn and warning_type != self._last_energy_warning:
+            if warning_type == "energy_high":
+                msg = f"I'm feeling very energetic! ({self.energy_level:.1f})"
+            elif warning_type == "energy_critical":
+                msg = f"Critical: Energy dangerously low! ({self.energy_level:.1f})"
+            else:  # energy_warning
+                msg = f"Warning: Energy running low ({self.energy_level:.1f})"
+            self._store_memory(warning_type, msg)
+            self._last_energy_warning = warning_type
+            
+        # Periodically save state (every 10 pulses)
+        if self.pulse_count % 10 == 0:
+            self._save_state()
+            
+        return result
 
     def _save_state(self) -> None:
         """Save current state to persistent storage"""
@@ -139,11 +165,12 @@ class Autognome(BaseModel):
 
     def _should_warn_energy(self) -> tuple[bool, str]:
         """Determine if we should store an energy-related memory"""
-        if self.energy_level >= self.config.initial_energy * 0.9:  # Very high energy
+        initial = self.config.core["initial_energy"]
+        if self.energy_level >= initial * 0.9:  # Very high energy
             return True, "energy_high"
-        elif self.energy_level <= self.config.initial_energy * 0.3:  # Critical low
+        elif self.energy_level <= initial * 0.3:  # Critical low
             return True, "energy_critical"
-        elif self.energy_level <= self.config.initial_energy * 0.5:  # Warning low
+        elif self.energy_level <= initial * 0.5:  # Warning low
             return True, "energy_warning"
         return False, ""
 
@@ -222,9 +249,10 @@ class Autognome(BaseModel):
 
     def sense_energy_state(self) -> str:
         """Determine current energy state relative to optimal"""
-        if self.energy_level >= self.config.optimal_energy + 0.5:
+        optimal = self.config.core["optimal_energy"]
+        if self.energy_level >= optimal + 0.5:
             return "high"
-        elif self.energy_level <= self.config.optimal_energy - 0.5:
+        elif self.energy_level <= optimal - 0.5:
             return "low"
         return "optimal"
 
@@ -241,9 +269,9 @@ class Autognome(BaseModel):
 
         # Modify decision based on emotional state
         if self.emotional_state == "afraid":
-            base_pulse_chance *= (1 - self.config.dark_fear_threshold)
+            base_pulse_chance *= (1 - self.config.core["dark_fear_threshold"])
         else:
-            base_pulse_chance += self.config.light_confidence_boost
+            base_pulse_chance += self.config.core["light_confidence_boost"]
 
         # Make final decision
         return "pulse" if base_pulse_chance > 0.5 else "rest"
@@ -270,8 +298,8 @@ class Autognome(BaseModel):
             "energy": self.energy_level,
             "pulse": self.pulse_count,
             "rest_count": self.rest_count,
-            "identifier": self.identifier,
-            "name": self.name,
+            "identifier": self.config.version,
+            "name": self.config.name,
             "light_level": light_level,
             "emotional_state": self.emotional_state,
             "is_observing": is_observing
@@ -297,15 +325,17 @@ class Autognome(BaseModel):
         self.pulse_count += 1
         self.rest_count += 1
         self.energy_level = min(
-            self.config.initial_energy,
-            self.energy_level + self.config.energy_recovery_rate
+            self.config.core["initial_energy"],
+            self.energy_level + self.config.core["energy_recovery_rate"]
         )
         
         light_level = self.sense_environment()
         observation = self.get_observation()
         if observation:
             return observation
-        return "..." if light_level == "light" else "*whimper*"
+            
+        expressions = self.config.personality["expressions"]["normal"]
+        return expressions["rest_light"] if light_level == "light" else expressions["rest_dark"]
 
     def pulse(self) -> str:
         """Active pulse with self-assertion"""
@@ -313,7 +343,7 @@ class Autognome(BaseModel):
             return "Cannot pulse: I have stopped"
             
         self.pulse_count += 1
-        self.energy_level -= self.config.energy_depletion_rate
+        self.energy_level -= self.config.core["energy_depletion_rate"]
         
         if self.energy_level <= 0:
             self.energy_level = 0
@@ -327,32 +357,8 @@ class Autognome(BaseModel):
         if observation:
             return observation
             
-        if light_level == "light":
-            return "I pulse boldly in the light!"
-        return "I pulse... though it's dark..."
-
-    def act(self) -> str:
-        """Perform one action cycle based on current state"""
-        action = self.decide_action()
-        result = self.pulse() if action == "pulse" else self.rest()
-        
-        # Check for significant energy states
-        should_warn, warning_type = self._should_warn_energy()
-        if should_warn and warning_type != self._last_energy_warning:
-            if warning_type == "energy_high":
-                msg = f"I'm feeling very energetic! ({self.energy_level:.1f})"
-            elif warning_type == "energy_critical":
-                msg = f"Critical: Energy dangerously low! ({self.energy_level:.1f})"
-            else:  # energy_warning
-                msg = f"Warning: Energy running low ({self.energy_level:.1f})"
-            self._store_memory(warning_type, msg)
-            self._last_energy_warning = warning_type
-            
-        # Periodically save state (every 10 pulses)
-        if self.pulse_count % 10 == 0:
-            self._save_state()
-            
-        return result
+        expressions = self.config.personality["expressions"]["normal"]
+        return expressions["light"] if light_level == "light" else expressions["dark"]
 
     def stop(self) -> None:
         """Stop the autognome's pulsing and save state"""
