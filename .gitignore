@@ -1,5 +1,7 @@
 # Python
 __pycache__/
+*/__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -34,3 +36,13 @@ ENV/
 # Project specific
 data/
 !data/.gitkeep
+
+# AutoGnome memory storage
+memory/
+*.sqlite3
+*.sqlite
+
+# ChromaDB specific
+.chroma/
+chroma_logs.log
+chroma_db.db

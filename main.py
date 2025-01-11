@@ -39,8 +39,8 @@ def run_autognome(auto: Autognome) -> None:
 if __name__ == "__main__":
     try:
         autognome = Autognome(
-            identifier="4",
-            name="Ray",
+            identifier="5",
+            name="Mnemosyne",  # Greek goddess of memory
             config=AutognomeConfig(
                 initial_energy=10.0,
                 optimal_energy=7.0,

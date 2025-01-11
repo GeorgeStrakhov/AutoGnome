@@ -79,7 +79,10 @@ class ConsoleDisplay:
             ),
             Layout(
                 Panel(
-                    get_gnome_art(status.get("state", "normal")),
+                    get_gnome_art(
+                        state=status.get("display_state", "normal"),
+                        is_observing=status.get("is_observing", False)
+                    ),
                     title=f"🧙 AutoGnome: AG-{status.get('identifier', '')}, {status.get('name', '')}",
                     border_style="bright_green"
                 ),
