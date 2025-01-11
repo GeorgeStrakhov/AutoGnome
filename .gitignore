@@ -40,3 +40,6 @@ memory/
 .chroma/
 chroma_logs.log
 chroma_db.db
+
+# Environment variables
+.env

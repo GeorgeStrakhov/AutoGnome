@@ -1,6 +1,6 @@
 from pathlib import Path
 import yaml
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
 @dataclass
@@ -13,7 +13,8 @@ class AutognomeConfig:
     personality: Dict[str, Any]
     memory: Dict[str, Any]
     display: Dict[str, Any]
-    sensors: list[Dict[str, Any]]
+    sensors: List[Dict[str, Any]]
+    mind: Dict[str, Any]
 
 class AutognomeLoader:
     """Loads autognome configurations from YAML files"""

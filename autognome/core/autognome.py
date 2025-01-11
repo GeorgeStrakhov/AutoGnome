@@ -1,12 +1,15 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, Field, PrivateAttr
+import asyncio
+
 from .loader import AutognomeConfig
 from .memory import ShortTermMemory
 from ..environment.sensor import EnvironmentSensor, LightLevel
 from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
 from .state_store import StateStore, JsonStateStore, PersistentState
+from .mind import MockMind, ActionContext, Action, ActionResult
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
@@ -37,6 +40,10 @@ class Autognome(BaseModel):
         default="normal",
         description="Current emotional state"
     )
+    mind_state: str = Field(
+        default="idle",
+        description="Current state of the mind"
+    )
     
     # Private attributes not included in serialization
     _sensor: EnvironmentSensor = PrivateAttr(default_factory=EnvironmentSensor)
@@ -48,6 +55,10 @@ class Autognome(BaseModel):
     _startup_time: datetime = PrivateAttr()
     _lifetime_stats: dict = PrivateAttr()
     _base_dir: Path = PrivateAttr()
+    _mind: Any = PrivateAttr()  # Will be Mind protocol
+    _last_user_message: Optional[datetime] = PrivateAttr(default=None)
+    _conversation_history: List[Dict[str, Any]] = PrivateAttr(default_factory=list)
+    _current_actions: List[Action] = PrivateAttr(default_factory=list)
     
     model_config = {
         "arbitrary_types_allowed": True
@@ -66,6 +77,12 @@ class Autognome(BaseModel):
         # Initialize state storage with full paths
         self._state_store = JsonStateStore(self._base_dir)
         self._long_term_memory = JsonlMemoryStore(self._base_dir)
+        
+        # Initialize mind based on config
+        if self.config.mind["type"] == "mock":
+            self._mind = MockMind(self.config.mind)
+        else:
+            raise ValueError(f"Unknown mind type: {self.config.mind['type']}")
         
         # Try to load previous state
         prev_state = self._state_store.load_state()
@@ -107,28 +124,162 @@ class Autognome(BaseModel):
         # Save initial state
         self._save_state()
 
-    def act(self) -> str:
+    def _build_context(self) -> ActionContext:
+        """Build context for mind operations"""
+        return ActionContext(
+            state={
+                "energy_level": self.energy_level,
+                "emotional_state": self.emotional_state,
+                "pulse_count": self.pulse_count,
+                "rest_count": self.rest_count,
+                "running": self.running,
+                "energy_state": self.sense_energy_state()
+            },
+            short_term=self._short_term_memory.analyze_patterns(),
+            long_term=self._long_term_memory.get_recent(5),
+            sensors={
+                "light": self._sensor.read_light_level()
+            },
+            conversation=self._conversation_history[-10:],  # Last 10 messages
+            last_user_message=self._last_user_message
+        )
+
+    async def act(self) -> Optional[str]:
         """Perform one action cycle based on current state"""
-        action = self.decide_action()
-        result = self.pulse() if action == "pulse" else self.rest()
-        
-        # Check for significant energy states
-        should_warn, warning_type = self._should_warn_energy()
-        if should_warn and warning_type != self._last_energy_warning:
-            if warning_type == "energy_high":
-                msg = f"I'm feeling very energetic! ({self.energy_level:.1f})"
-            elif warning_type == "energy_critical":
-                msg = f"Critical: Energy dangerously low! ({self.energy_level:.1f})"
-            else:  # energy_warning
-                msg = f"Warning: Energy running low ({self.energy_level:.1f})"
-            self._store_memory(warning_type, msg)
-            self._last_energy_warning = warning_type
+        if not self.running:
+            return None
             
-        # Periodically save state (every 10 pulses)
+        # Update pulse count and check energy
+        self.pulse_count += 1
         if self.pulse_count % 10 == 0:
             self._save_state()
             
-        return result
+        # Build context for mind
+        context = self._build_context()
+        
+        try:
+            # Think phase
+            self.mind_state = "thinking"
+            actions = await asyncio.wait_for(
+                self._mind.think(context),
+                timeout=self.config.mind["think_timeout"]
+            )
+        except asyncio.TimeoutError:
+            self._store_memory("warning", "Mind took too long to think")
+            actions = []
+        except Exception as e:
+            self._store_memory("error", f"Mind error during thinking: {e}")
+            actions = []
+            
+        # Store actions for status display
+        self._current_actions = actions
+        
+        # Execute actions
+        results = []
+        message = None
+        
+        for action in actions:
+            try:
+                self.mind_state = action.display_state
+                result = await action.execute(context)
+                results.append(result)
+                
+                # Update state based on action type
+                if result.metadata["type"] == "speak":
+                    message = result.message
+                    self._conversation_history.append({
+                        "role": "assistant",
+                        "content": message,
+                        "timestamp": datetime.now()
+                    })
+                elif result.metadata["type"] == "rest":
+                    self.energy_level = min(
+                        self.config.core["initial_energy"],
+                        self.energy_level + self.config.core["energy_recovery_rate"]
+                    )
+                    
+            except Exception as e:
+                self._store_memory("error", f"Action execution error: {e}")
+                results.append(ActionResult(
+                    success=False,
+                    message=str(e),
+                    metadata={"type": "error"}
+                ))
+                
+        # Always consume some energy
+        self.energy_level -= self.config.core["energy_depletion_rate"]
+        if self.energy_level <= 0:
+            self.energy_level = 0
+            self._store_memory("energy_critical", "Energy completely depleted!")
+            self.stop()
+            return "My energy is depleted. Shutting down..."
+            
+        # Reflect phase
+        try:
+            self.mind_state = "reflecting"
+            await asyncio.wait_for(
+                self._mind.reflect(context, results),
+                timeout=self.config.mind["reflect_timeout"]
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            self._store_memory("warning", f"Reflection error: {e}")
+            
+        self.mind_state = "idle"
+        return message
+
+    def record_user_message(self, message: str) -> None:
+        """Record a message from the user"""
+        self._last_user_message = datetime.now()
+        self._conversation_history.append({
+            "role": "user",
+            "content": message,
+            "timestamp": self._last_user_message
+        })
+
+    def get_status(self) -> dict:
+        """Get the current status of the autognome"""
+        # First get environment and update emotional state
+        light_level = self.sense_environment()
+        self.update_emotional_state(light_level)
+        
+        # Then check for observations
+        observation = self.get_observation()
+        # Only observing if we have a NEW observation to make
+        is_observing = bool(observation) and observation != self._last_observation
+        self._last_observation = observation
+        
+        return {
+            "time": datetime.now().strftime('%H:%M:%S'),
+            "state": "active",
+            "display_state": self.emotional_state,
+            "energy": self.energy_level,
+            "pulse": self.pulse_count,
+            "rest_count": self.rest_count,
+            "identifier": self.config.version,
+            "name": self.config.name,
+            "light_level": light_level,
+            "emotional_state": self.emotional_state,
+            "is_observing": is_observing,
+            "mind_state": self.mind_state,
+            "ascii_art": self._get_ascii_art(is_observing)
+        }
+
+    def _get_ascii_art(self, is_observing: bool) -> str:
+        """Get appropriate ASCII art based on state"""
+        ascii_art = self.config.display["ascii_art"]
+        if not self.running:
+            art_key = "sleeping"
+        elif is_observing or self.mind_state in ["thinking", "researching"]:
+            art_key = "thinking"
+        else:
+            art_key = self.emotional_state
+            
+        art_path = self._base_dir / ascii_art[art_key]
+        try:
+            with open(art_path) as f:
+                return f.read()
+        except Exception as e:
+            return f"Error loading ASCII art: {e}"
 
     def _save_state(self) -> None:
         """Save current state to persistent storage"""
@@ -275,40 +426,6 @@ class Autognome(BaseModel):
 
         # Make final decision
         return "pulse" if base_pulse_chance > 0.5 else "rest"
-
-    def get_status(self) -> dict:
-        """Get the current status of the autognome"""
-        # First get environment and update emotional state
-        light_level = self.sense_environment()
-        self.update_emotional_state(light_level)
-        
-        # Then check for observations
-        observation = self.get_observation()
-        # Only observing if we have a NEW observation to make
-        is_observing = bool(observation) and observation != self._last_observation
-        self._last_observation = observation
-        
-        # Get current action state (using current emotional state)
-        action_state = "active" if self.decide_action() == "pulse" else "resting"
-        
-        return {
-            "time": datetime.now().strftime('%H:%M:%S'),
-            "state": action_state,
-            "display_state": self.emotional_state,
-            "energy": self.energy_level,
-            "pulse": self.pulse_count,
-            "rest_count": self.rest_count,
-            "identifier": self.config.version,
-            "name": self.config.name,
-            "light_level": light_level,
-            "emotional_state": self.emotional_state,
-            "is_observing": is_observing
-        }
-
-    @property
-    def is_resting(self) -> bool:
-        """Check if the autognome is currently resting"""
-        return self.decide_action() == "rest"
 
     def start_rest(self) -> None:
         """Force the autognome to take a rest"""

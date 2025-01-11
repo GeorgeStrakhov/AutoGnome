@@ -5,9 +5,10 @@ import webbrowser
 import threading
 import time
 from datetime import timedelta
-from autognome.web.server import app
+from autognome.web.server import app, pulse_loop
 from autognome.core.loader import AutognomeLoader
 from autognome.core.autognome import Autognome
+import asyncio
 
 def format_duration(seconds: float) -> str:
     """Format duration in seconds to a human readable string"""
@@ -119,6 +120,8 @@ if __name__ == "__main__":
     if not config:
         print(f"Failed to start {version}")
         sys.exit(1)
+        
+    # Create and start the AG
     app.state.current_autognome = Autognome(config=config)
     
     # Set up signal handlers

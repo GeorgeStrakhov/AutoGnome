@@ -51,7 +51,63 @@ To go to a certain generation, use `git checkout AG1` or `git checkout AG2` etc.
  - [ ] AG 9: Basic language model integration. Can engage in more natural conversations, express its thoughts about its state and experiences, and remember conversation context. First step towards more sophisticated self-awareness and reasoning.
 
 
- ## Running the project
+## Architecture
+
+The AutoGnome is built with these main parts:
+
+### Core Loop
+- A FastAPI server runs the main loop via websockets
+- Every second, the loop:
+  1. Asks the mind what to do (think phase)
+  2. Executes the actions (act phase)
+  3. Updates memories and state (reflect phase)
+- All operations are async to prevent blocking
+
+### Mind & Actions
+- Mind decides what to do each pulse
+- Can return multiple actions (e.g., research then speak)
+- Each action has a display state shown in UI
+- Actions can take time (e.g., research is slow)
+- Timeouts prevent actions from blocking too long
+
+### Memory & State
+- Short-term memory: Last 60 events in memory - only in memory, not persisted
+- Long-term memory: All events in jsonl file - persisted
+- State file: Saves energy, emotions etc. - persisted
+- Everything persists between restarts
+
+### Web Interface
+- Simple HTML/JS frontend
+- Shows ASCII art based on state
+- Shows stats (energy, emotions etc.)
+- Websocket for real-time updates
+- Basic commands (/help, /rest etc.)
+
+### Sensors
+- Light sensor: Reads from a file
+- User input: Through websocket
+- Both affect the AG's behavior
+
+The code is organized in:
+
+```
+autognome/
+  core/           # Main logic
+    mind.py       # Mind protocol and implementations
+    memory.py     # Short-term memory
+    autognome.py  # Main class
+    config.py     # Config loading
+    loader.py     # AG version loading
+  web/           # Web interface
+    server.py     # FastAPI server
+    static/      # Frontend files
+  environment/   # Sensors
+    sensor.py    # Sensor implementations
+  data/          # Data storage
+    autognomes/  # AG data - for each AG there is a folder with its data, including ag.yaml config, memories.jsonl, state.json and ascii_art/ folder with its current ascii art for different emotional states
+```
+
+## Running the project
 
 1. create a virtual environment (uv recommended): `python -m venv .venv`
 2. activate the virtual environment: `source .venv/bin/activate`
