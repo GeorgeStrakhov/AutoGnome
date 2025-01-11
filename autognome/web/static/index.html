@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoGnome</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Fira Code', monospace;
+        }
+        
+        .ascii-art {
+            font-family: 'Fira Code', monospace;
+            white-space: pre;
+            font-size: 12px;
+            line-height: 1.2;
+        }
+
+        /* Terminal-like scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+    </style>
+</head>
+<body class="bg-black text-green-400 min-h-screen">
+    <div class="container mx-auto p-4 flex flex-col h-screen max-w-4xl">
+        <!-- Header with status -->
+        <div class="flex justify-between items-start mb-4 border border-green-800 bg-black p-4 rounded">
+            <div class="flex-1">
+                <h1 class="text-2xl font-bold mb-2 text-green-500">
+                    AutoGnome <span id="autognome-id" class="text-lg text-green-600"></span>
+                </h1>
+                <div id="status" class="grid grid-cols-2 gap-2 text-sm">
+                    <div>Time: <span id="time" class="text-green-400"></span></div>
+                    <div>Display State: <span id="display-state" class="text-green-400">normal</span></div>
+                    <div>Energy: <span id="energy" class="text-green-400">10.0</span></div>
+                    <div>State: <span id="state" class="text-green-400">active</span></div>
+                    <div>Pulse Count: <span id="pulse-count" class="text-green-400">0</span></div>
+                    <div>Rest Count: <span id="rest-count" class="text-green-400">0</span></div>
+                    <div>Light: <span id="light-level" class="text-green-400">light</span></div>
+                    <div>Emotional State: <span id="emotional-state" class="text-green-400">normal</span></div>
+                    <div>Observing: <span id="is-observing" class="text-green-400">false</span></div>
+                    <div>
+                        <button id="light-switch" class="px-2 py-1 bg-green-900 hover:bg-green-800 rounded text-green-400">
+                            Toggle Light
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <pre id="ascii-art" class="ascii-art text-green-500 ml-4"></pre>
+        </div>
+
+        <!-- Chat area -->
+        <div id="chat" class="flex-1 border border-green-800 bg-black p-4 rounded mb-4 overflow-y-auto font-mono">
+            <!-- Messages will be inserted here -->
+            <div class="text-green-600 mb-2">System initialized...</div>
+        </div>
+
+        <!-- Input area -->
+        <div class="border border-green-800 bg-black p-4 rounded">
+            <form id="input-form" class="flex gap-2">
+                <span class="text-green-500">></span>
+                <input type="text" id="message-input" 
+                    class="flex-1 bg-black text-green-400 focus:outline-none"
+                    placeholder="Type a command...">
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        const chat = document.getElementById('chat');
+        const form = document.getElementById('input-form');
+        const input = document.getElementById('message-input');
+        const asciiArt = document.getElementById('ascii-art');
+        const energySpan = document.getElementById('energy');
+        const stateSpan = document.getElementById('state');
+
+        // Add message to chat
+        function addMessage(text, type = 'autognome') {
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = `mb-2 ${type === 'user' ? 'text-blue-400' : 'text-green-400'}`;
+            div.textContent = `[${timestamp}] ${type === 'user' ? '> ' : ''}${text}`;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // Update status display
+        function updateStatus(status) {
+            // Update title
+            document.getElementById('autognome-id').textContent = 
+                `(AG${status.identifier} - ${status.name})`;
+                
+            // Update other status fields
+            document.getElementById('time').textContent = status.time;
+            document.getElementById('display-state').textContent = status.display_state;
+            document.getElementById('energy').textContent = status.energy.toFixed(1);
+            document.getElementById('state').textContent = status.state;
+            document.getElementById('pulse-count').textContent = status.pulse;
+            document.getElementById('rest-count').textContent = status.rest_count;
+            document.getElementById('light-level').textContent = status.light_level;
+            document.getElementById('emotional-state').textContent = status.emotional_state;
+            document.getElementById('is-observing').textContent = status.is_observing;
+            document.getElementById('ascii-art').innerHTML = status.ascii_art;
+            
+            // Update colors based on energy level
+            if (status.energy < 5) {
+                energySpan.className = 'text-red-400';
+            } else if (status.energy < 7) {
+                energySpan.className = 'text-yellow-400';
+            } else {
+                energySpan.className = 'text-green-400';
+            }
+        }
+
+        // WebSocket event handlers
+        ws.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'status') {
+                    updateStatus(data.data);
+                }
+            } catch {
+                // If not JSON, treat as regular message
+                addMessage(event.data);
+            }
+        };
+
+        ws.onopen = function() {
+            // Request initial status
+            ws.send('status');
+        };
+
+        ws.onclose = function() {
+            addMessage('Connection closed', 'system');
+        };
+
+        // Form submission
+        form.onsubmit = function(e) {
+            e.preventDefault();
+            if (input.value) {
+                ws.send(input.value);
+                addMessage(input.value, 'user');
+                input.value = '';
+            }
+        };
+
+        // Add light switch handler
+        document.getElementById('light-switch').addEventListener('click', async () => {
+            await ws.send('toggle_light');
+        });
+    </script>
+</body>
+</html> 

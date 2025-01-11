@@ -277,6 +277,18 @@ class Autognome(BaseModel):
             "is_observing": is_observing
         }
 
+    @property
+    def is_resting(self) -> bool:
+        """Check if the autognome is currently resting"""
+        return self.decide_action() == "rest"
+
+    def start_rest(self) -> None:
+        """Force the autognome to take a rest"""
+        if not self.running:
+            return
+        self._store_memory("command", "Taking a moment to rest...")
+        self.rest()
+
     def rest(self) -> str:
         """Rest during a pulse cycle"""
         if not self.running:
@@ -335,6 +347,10 @@ class Autognome(BaseModel):
                 msg = f"Warning: Energy running low ({self.energy_level:.1f})"
             self._store_memory(warning_type, msg)
             self._last_energy_warning = warning_type
+            
+        # Periodically save state (every 10 pulses)
+        if self.pulse_count % 10 == 0:
+            self._save_state()
             
         return result
 
