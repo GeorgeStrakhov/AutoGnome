@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from pathlib import Path
 
 class AutognomeConfig(BaseModel):
     """Configuration for an autognome"""
@@ -43,4 +44,13 @@ class AutognomeConfig(BaseModel):
         ge=0,
         le=1,
         description="Additional probability of pulsing when in light"
+    )
+    # Memory settings
+    memory_dir: Path = Field(
+        default=Path("memory"),
+        description="Directory for storing long-term memories"
+    )
+    memory_reflection_threshold: int = Field(
+        default=5,
+        description="Minimum similar memories needed to trigger reflection"
     ) 

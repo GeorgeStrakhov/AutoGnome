@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from .config import AutognomeConfig
 from .memory import ShortTermMemory
 from ..environment.sensor import EnvironmentSensor, LightLevel
+from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
@@ -46,46 +47,104 @@ class Autognome(BaseModel):
     
     # Private attributes not included in serialization
     _sensor: EnvironmentSensor = PrivateAttr()
-    _memory: ShortTermMemory = PrivateAttr()
+    _short_term_memory: ShortTermMemory = PrivateAttr()
+    _long_term_memory: LongTermMemoryStore = PrivateAttr()
     _last_observation: str = PrivateAttr(default="")
+    _last_energy_warning: str = PrivateAttr(default=None)
 
     def __init__(self, **data):
         if 'energy_level' not in data:
             data['energy_level'] = data.get('config', AutognomeConfig()).initial_energy
         super().__init__(**data)
         self._sensor = EnvironmentSensor()
-        self._memory = ShortTermMemory()
+        self._short_term_memory = ShortTermMemory()
+        self._long_term_memory = JsonlMemoryStore(self.config.memory_dir)
+        # Store startup event
+        self._store_memory("startup", f"I am {self.name}, and I have awakened!")
+        self._last_energy_warning = None
+
+    def _should_warn_energy(self) -> tuple[bool, str]:
+        """Determine if we should store an energy-related memory"""
+        if self.energy_level >= self.config.initial_energy * 0.9:  # Very high energy
+            return True, "energy_high"
+        elif self.energy_level <= self.config.initial_energy * 0.3:  # Critical low
+            return True, "energy_critical"
+        elif self.energy_level <= self.config.initial_energy * 0.5:  # Warning low
+            return True, "energy_warning"
+        return False, ""
 
     def sense_environment(self) -> LightLevel:
         """Read the current light level and record it in memory"""
         level = self._sensor.read_light_level()
-        event = self._memory.record_state(level)
+        event = self._short_term_memory.record_state(level)
         return level
 
     def get_observation(self) -> str:
         """Generate an observation about environmental patterns"""
-        patterns = self._memory.analyze_patterns()
+        patterns = self._short_term_memory.analyze_patterns()
         duration = patterns["current_state_duration"]
-        current_state = self._memory.last_state or "unknown"
+        current_state = self._short_term_memory.last_state or "unknown"
         
+        observation = ""
         # Comment on state duration
         if duration > 300:  # 5 minutes
-            return f"It's been {current_state} for quite a while now... ({int(duration/60)} minutes)"
+            observation = f"It's been {current_state} for quite a while now... ({int(duration/60)} minutes)"
         elif duration > 60:  # 1 minute
-            return f"It's been {current_state} for a minute now..."
+            observation = f"It's been {current_state} for a minute now..."
         
         # Comment on frequent changes
         transitions = patterns["transitions_last_minute"]
         if transitions > 5:
-            return f"The light is changing so quickly! {transitions} times in the last minute!"
+            observation = f"The light is changing so quickly! {transitions} times in the last minute!"
         elif transitions > 0:
-            return f"The light changed {transitions} times in the last minute."
+            observation = f"The light changed {transitions} times in the last minute."
+        
+        # Only store significant observations that are different from last one
+        if observation and observation != self._last_observation:
+            self._store_memory("observation", observation)
+            self._last_observation = observation
             
-        return ""  # No notable patterns to comment on
+        return observation
+
+    def _store_memory(self, event_type: str, observation: str) -> None:
+        """Store a new long-term memory"""
+        from datetime import datetime
+        
+        # During shutdown, don't try to read sensors
+        if event_type == "shutdown":
+            light_level = "unknown"
+            energy_state = "shutdown"
+        else:
+            light_level = self._sensor.read_light_level()
+            energy_state = self.sense_energy_state()
+            
+        memory = LongTermMemory(
+            timestamp=datetime.now(),
+            event_type=event_type,
+            state={
+                "energy_level": self.energy_level,
+                "pulse_count": self.pulse_count,
+                "rest_count": self.rest_count,
+                "running": self.running
+            },
+            observation=observation,
+            emotional_state=self.emotional_state,
+            context={
+                "light_level": light_level,
+                "energy_state": energy_state
+            }
+        )
+        self._long_term_memory.store(memory)
 
     def update_emotional_state(self, light_level: LightLevel) -> None:
         """Update emotional state based on environment"""
-        self.emotional_state = "normal" if light_level == "light" else "afraid"
+        new_state = "normal" if light_level == "light" else "afraid"
+        if new_state != self.emotional_state:
+            self._store_memory(
+                "emotional_change",
+                f"I'm feeling {new_state} now... (was {self.emotional_state})"
+            )
+            self.emotional_state = new_state
 
     def sense_energy_state(self) -> str:
         """Determine current energy state relative to optimal"""
@@ -172,7 +231,9 @@ class Autognome(BaseModel):
         
         if self.energy_level <= 0:
             self.energy_level = 0
-            self.stop()
+            # Store critical energy memory before shutdown
+            self._store_memory("energy_critical", "Energy completely depleted!")
+            self.stop()  # This will store the shutdown memory
             return "My energy is depleted. Shutting down..."
         
         light_level = self.sense_environment()
@@ -187,8 +248,28 @@ class Autognome(BaseModel):
     def act(self) -> str:
         """Perform one action cycle based on current state"""
         action = self.decide_action()
-        return self.pulse() if action == "pulse" else self.rest()
+        result = self.pulse() if action == "pulse" else self.rest()
+        
+        # Check for significant energy states
+        should_warn, warning_type = self._should_warn_energy()
+        if should_warn and warning_type != self._last_energy_warning:
+            if warning_type == "energy_high":
+                msg = f"I'm feeling very energetic! ({self.energy_level:.1f})"
+            elif warning_type == "energy_critical":
+                msg = f"Critical: Energy dangerously low! ({self.energy_level:.1f})"
+            else:  # energy_warning
+                msg = f"Warning: Energy running low ({self.energy_level:.1f})"
+            self._store_memory(warning_type, msg)
+            self._last_energy_warning = warning_type
+            
+        return result
 
     def stop(self) -> None:
         """Stop the autognome's pulsing"""
-        self.running = False 
+        self.running = False  # Set running to False first
+        if not hasattr(self, '_has_shutdown'):  # Only store shutdown memory once
+            self._store_memory(
+                "shutdown", 
+                f"Going to sleep... Final energy: {self.energy_level:.1f}"
+            )
+            self._has_shutdown = True 

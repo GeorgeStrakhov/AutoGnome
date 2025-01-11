@@ -37,10 +37,5 @@ _each new generation is a new commit in this repository with the name e.g. "AG1"
  - [x] AG 3: Sensor for monitoring its own energy level and ability to decide to rest or continue. Spending one pulse without saying anything is a rest.
  - [x] AG 4: Simple environmental sensor (light/dark) through checking a file. Develops fear of the dark: rests more frequently in darkness, pulses more in light. First emotional response to environment.
  - [x] AG 5: Short-term memory and basic pattern recognition. Remembers its last few experiences (light/dark transitions) and starts to anticipate changes. Can say things like "The light changed 3 times in the last minute" or "It's been dark for a while now...". Also facial expression changes depending on the emotional state, just for the fun of it.
- - [ ] AG 6: Long-term persistent memory with vector storage. Uses ChromaDB to store and retrieve memories of experiences, enabling:
-    - Persistence across runs (memories stored in `memory/` directory)
-    - Memory introspection through a simple web interface showing stored memories and retrievals
-    - Abstracted memory interface allowing future storage backend changes
-    - Reflection on past experiences: "This reminds me of last Tuesday when..."
-    - Pattern recognition across longer time periods: "I've noticed the light changes around 2pm most days"
-    - Memory-informed decision making: "Based on my past experiences, I should rest now"
+ - [x] AG 6: Long-term persistent memory (currently jsonl, but in the future will be vector storage)
+ - [ ] AG 7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
