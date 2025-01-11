@@ -25,6 +25,7 @@ Our future AG(n) should be able to:
 - have a way to sense its environment i.e. have multiple sensors that can be used to understand the context and context changes. e.g. if AG(n) receives an email or a message or someone replies to its tweet etc.
 - have a way to act on its environment i.e. have multiple actuators that can be used to influence the environment. e.g. if AG(n) decides to tweet or send an email or do research on the internet or browse the web etc.
 - have a way to learn from its experiences and use that to improve its decision-making process. Memories and learnings should be stored in a way that allows for retrieval and reuse. (probably in a vector database)
+- AG(n)'s energy level should be something that is tracked and it can meaningfully replenish. e.g. it can rest and sleep and wake up with more energy. or it can get more energy from community engaging with it.
 
 
 
@@ -38,4 +39,5 @@ _each new generation is a new commit in this repository with the name e.g. "AG1"
  - [x] AG 4: Simple environmental sensor (light/dark) through checking a file. Develops fear of the dark: rests more frequently in darkness, pulses more in light. First emotional response to environment.
  - [x] AG 5: Short-term memory and basic pattern recognition. Remembers its last few experiences (light/dark transitions) and starts to anticipate changes. Can say things like "The light changed 3 times in the last minute" or "It's been dark for a while now...". Also facial expression changes depending on the emotional state, just for the fun of it.
  - [x] AG 6: Long-term persistent memory (currently jsonl, but in the future will be vector storage)
- - [ ] AG 7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
+ - [x] AG 7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
+ - [ ] AG 8: Console input sensor and basic interaction. Can receive and respond to simple text commands from the user (like "hello", "status", "rest", etc). First step towards two-way communication and environmental awareness beyond light/dark.

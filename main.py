@@ -32,6 +32,8 @@ def display_session_summary(auto: Autognome) -> None:
         print(f"\nSession summary error: {summary['error']}")
         return
         
+    lifetime = auto.get_lifetime_stats()
+    
     print("\n=== Session Summary ===")
     print(f"Duration: {format_duration(summary['session_duration'])}")
     print(f"Total memories formed: {summary['total_memories']}")
@@ -41,10 +43,17 @@ def display_session_summary(auto: Autognome) -> None:
         print(f"  {event_type}: {count}")
     
     final_state = summary['final_state']
-    print("\nFinal state:")
+    print("\nSession state:")
     print(f"  Energy level: {final_state['energy_level']:.1f}")
-    print(f"  Total pulses: {final_state['pulse_count']}")
-    print(f"  Total rests: {final_state['rest_count']}")
+    print(f"  Session pulses: {final_state['pulse_count']}")
+    print(f"  Session rests: {final_state['rest_count']}")
+    
+    print("\nLifetime Statistics:")
+    print(f"  Total wake cycles: {lifetime['wake_count']}")
+    print(f"  Total runtime: {format_duration(lifetime['total_runtime'])}")
+    print(f"  Total hibernation: {format_duration(lifetime['total_hibernation_time'])}")
+    print(f"  Total pulses: {lifetime['total_pulses']}")
+    print(f"  Total rests: {lifetime['total_rests']}")
     print("===================")
 
 def run_autognome(auto: Autognome) -> None:
@@ -53,7 +62,8 @@ def run_autognome(auto: Autognome) -> None:
     
     def handle_interrupt(sig, frame):
         """Handle interrupt signal by stopping the autognome"""
-        display.add_message("Received shutdown signal...", "system")
+        print("\nReceived shutdown signal...")
+        display.add_message("Preparing for hibernation...", "system")
         auto.stop()  # Call stop directly
     
     # Set up signal handler
@@ -81,8 +91,8 @@ if __name__ == "__main__":
     autognome = None
     try:
         autognome = Autognome(
-            identifier="6",  # AG6
-            name="Mnemosyne Long",  # Added 'Long' to emphasize long-term memory
+            identifier="7",  # AG7
+            name="Chronos the Constant",  # Emphasizes continuous existence through time
             config=AutognomeConfig(
                 initial_energy=10.0,
                 optimal_energy=7.0,
@@ -97,5 +107,8 @@ if __name__ == "__main__":
         print(f"\nFailed to start/run Autognome: {e}")
     finally:
         if autognome:
+            # Ensure we're stopped before displaying summary
+            if autognome.running:
+                autognome.stop()
             display_session_summary(autognome)
-        print("\nGoodbye!")
+            print("\nHibernation complete. Goodbye!")

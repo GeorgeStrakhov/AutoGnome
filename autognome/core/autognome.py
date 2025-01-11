@@ -1,9 +1,11 @@
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel, Field, PrivateAttr
 from .config import AutognomeConfig
 from .memory import ShortTermMemory
 from ..environment.sensor import EnvironmentSensor, LightLevel
 from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
+from .state_store import StateStore, JsonStateStore, PersistentState
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
@@ -24,15 +26,15 @@ class Autognome(BaseModel):
     pulse_count: int = Field(
         default=0, 
         ge=0,
-        description="Number of pulses emitted"
+        description="Number of pulses in current session"
     )
     rest_count: int = Field(
         default=0,
         ge=0,
-        description="Number of times rested"
+        description="Number of rests in current session"
     )
     energy_level: float = Field(
-        ...,
+        default=None,
         ge=0,
         description="Current energy level"
     )
@@ -46,22 +48,94 @@ class Autognome(BaseModel):
     )
     
     # Private attributes not included in serialization
-    _sensor: EnvironmentSensor = PrivateAttr()
-    _short_term_memory: ShortTermMemory = PrivateAttr()
+    _sensor: EnvironmentSensor = PrivateAttr(default_factory=EnvironmentSensor)
+    _short_term_memory: ShortTermMemory = PrivateAttr(default_factory=ShortTermMemory)
     _long_term_memory: LongTermMemoryStore = PrivateAttr()
+    _state_store: StateStore = PrivateAttr()
     _last_observation: str = PrivateAttr(default="")
     _last_energy_warning: str = PrivateAttr(default=None)
+    _startup_time: datetime = PrivateAttr()
+    _lifetime_stats: dict = PrivateAttr()
+    
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
-    def __init__(self, **data):
-        if 'energy_level' not in data:
-            data['energy_level'] = data.get('config', AutognomeConfig()).initial_energy
-        super().__init__(**data)
-        self._sensor = EnvironmentSensor()
-        self._short_term_memory = ShortTermMemory()
+    def model_post_init(self, __context: Any) -> None:
+        """Initialize after model validation"""
+        # Initialize state storage first
+        self._state_store = JsonStateStore(self.config.memory_dir)
+        
+        # Try to load previous state
+        prev_state = self._state_store.load_state()
+        if prev_state:
+            # Calculate hibernation time
+            now = datetime.now()
+            hibernation_time = (now - prev_state.last_active).total_seconds()
+            
+            # Initialize with previous state
+            self.energy_level = prev_state.energy_level
+            self.emotional_state = prev_state.emotional_state
+            self._lifetime_stats = {
+                'total_pulses': prev_state.total_pulses,
+                'total_rests': prev_state.total_rests,
+                'total_runtime': prev_state.total_runtime,
+                'total_hibernation_time': prev_state.total_hibernation_time + hibernation_time,
+                'wake_count': prev_state.wake_count + 1
+            }
+        else:
+            # Initialize fresh state
+            if self.energy_level is None:
+                self.energy_level = self.config.initial_energy
+            self._lifetime_stats = {
+                'total_pulses': 0,
+                'total_rests': 0,
+                'total_runtime': 0,
+                'total_hibernation_time': 0,
+                'wake_count': 1
+            }
+            
+        self._startup_time = datetime.now()
         self._long_term_memory = JsonlMemoryStore(self.config.memory_dir)
-        # Store startup event
-        self._store_memory("startup", f"I am {self.name}, and I have awakened!")
-        self._last_energy_warning = None
+        
+        # Store startup event with wake count
+        self._store_memory(
+            "startup", 
+            f"I am {self.name}, and I have awakened for the {self._lifetime_stats['wake_count']} time!"
+        )
+
+    def _save_state(self) -> None:
+        """Save current state to persistent storage"""
+        now = datetime.now()
+        runtime = (now - self._startup_time).total_seconds()
+        
+        state = PersistentState(
+            energy_level=self.energy_level,
+            emotional_state=self.emotional_state,
+            last_light_level=self._sensor.read_light_level(),
+            last_active=now,
+            last_hibernation=now if not self.running else None,
+            total_pulses=self._lifetime_stats['total_pulses'] + self.pulse_count,
+            total_rests=self._lifetime_stats['total_rests'] + self.rest_count,
+            total_runtime=self._lifetime_stats['total_runtime'] + runtime,
+            total_hibernation_time=self._lifetime_stats['total_hibernation_time'],
+            wake_count=self._lifetime_stats['wake_count']
+        )
+        self._state_store.save_state(state)
+
+    def get_lifetime_stats(self) -> dict:
+        """Get the current lifetime statistics"""
+        now = datetime.now()
+        runtime = (now - self._startup_time).total_seconds()
+        
+        return {
+            'total_pulses': self._lifetime_stats['total_pulses'] + self.pulse_count,
+            'total_rests': self._lifetime_stats['total_rests'] + self.rest_count,
+            'total_runtime': self._lifetime_stats['total_runtime'] + runtime,
+            'total_hibernation_time': self._lifetime_stats['total_hibernation_time'],
+            'wake_count': self._lifetime_stats['wake_count'],
+            'current_session_runtime': runtime
+        }
 
     def _should_warn_energy(self) -> tuple[bool, str]:
         """Determine if we should store an energy-related memory"""
@@ -265,11 +339,12 @@ class Autognome(BaseModel):
         return result
 
     def stop(self) -> None:
-        """Stop the autognome's pulsing"""
-        self.running = False  # Set running to False first
+        """Stop the autognome's pulsing and save state"""
         if not hasattr(self, '_has_shutdown'):  # Only store shutdown memory once
             self._store_memory(
                 "shutdown", 
                 f"Going to sleep... Final energy: {self.energy_level:.1f}"
             )
-            self._has_shutdown = True 
+            self._save_state()  # Save state before shutting down
+            self._has_shutdown = True
+        self.running = False 
