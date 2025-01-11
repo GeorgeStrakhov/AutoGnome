@@ -1,9 +1,10 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from .config import AutognomeConfig
+from ..environment.sensor import EnvironmentSensor, LightLevel
 
 class Autognome(BaseModel):
-    """An autognome with energy management and decision making"""
+    """An autognome with energy management and emotional responses"""
     identifier: str = Field(
         ...,
         min_length=1, 
@@ -37,11 +38,27 @@ class Autognome(BaseModel):
         default=True,
         description="Whether the autognome is currently running"
     )
+    emotional_state: str = Field(
+        default="normal",
+        description="Current emotional state"
+    )
+    
+    # Private attributes not included in serialization
+    _sensor: EnvironmentSensor = PrivateAttr()
 
     def __init__(self, **data):
         if 'energy_level' not in data:
             data['energy_level'] = data.get('config', AutognomeConfig()).initial_energy
         super().__init__(**data)
+        self._sensor = EnvironmentSensor()
+
+    def sense_environment(self) -> LightLevel:
+        """Read the current light level"""
+        return self._sensor.read_light_level()
+
+    def update_emotional_state(self, light_level: LightLevel) -> None:
+        """Update emotional state based on environment"""
+        self.emotional_state = "normal" if light_level == "light" else "afraid"
 
     def sense_energy_state(self) -> str:
         """Determine current energy state relative to optimal"""
@@ -52,19 +69,34 @@ class Autognome(BaseModel):
         return "optimal"
 
     def decide_action(self) -> str:
-        """Decide whether to pulse or rest based on energy state"""
+        """Decide whether to pulse or rest based on energy and emotional state"""
+        # First check environment
+        light_level = self.sense_environment()
+        self.update_emotional_state(light_level)
+
+        # Base decision on energy state
         energy_state = self.sense_energy_state()
         if energy_state == "high":
-            return "pulse"
+            base_pulse_chance = 0.8
         elif energy_state == "low":
-            return "rest"
-        # At optimal energy, bias towards resting if energy is below optimal
-        if self.energy_level < self.config.optimal_energy:
-            return "rest"
-        return "pulse"
+            base_pulse_chance = 0.2
+        else:
+            base_pulse_chance = 0.5
+
+        # Modify decision based on emotional state
+        if self.emotional_state == "afraid":
+            base_pulse_chance *= (1 - self.config.dark_fear_threshold)
+        else:
+            base_pulse_chance += self.config.light_confidence_boost
+
+        # Make final decision
+        return "pulse" if base_pulse_chance > 0.5 else "rest"
 
     def get_status(self) -> dict:
         """Get the current status of the autognome"""
+        light_level = self.sense_environment()
+        self.update_emotional_state(light_level)
+        
         return {
             "time": datetime.now().strftime('%H:%M:%S'),
             "state": "active" if self.decide_action() == "pulse" else "resting",
@@ -72,7 +104,9 @@ class Autognome(BaseModel):
             "pulse": self.pulse_count,
             "rest_count": self.rest_count,
             "identifier": self.identifier,
-            "name": self.name
+            "name": self.name,
+            "light_level": light_level,
+            "emotional_state": self.emotional_state
         }
 
     def rest(self) -> str:
@@ -87,7 +121,8 @@ class Autognome(BaseModel):
             self.energy_level + self.config.energy_recovery_rate
         )
         
-        return "..." # Silent pulse
+        light_level = self.sense_environment()
+        return "..." if light_level == "light" else "*whimper*"  # Different rest response in dark
 
     def pulse(self) -> str:
         """Active pulse with self-assertion"""
@@ -102,7 +137,10 @@ class Autognome(BaseModel):
             self.stop()
             return "My energy is depleted. Shutting down..."
         
-        return "I pulse, therefore I am."
+        light_level = self.sense_environment()
+        if light_level == "light":
+            return "I pulse boldly in the light!"
+        return "I pulse... though it's dark..."  # Less confident in dark
 
     def act(self) -> str:
         """Perform one action cycle based on current state"""

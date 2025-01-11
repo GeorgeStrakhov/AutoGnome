@@ -39,13 +39,15 @@ def run_autognome(auto: Autognome) -> None:
 if __name__ == "__main__":
     try:
         autognome = Autognome(
-            identifier="3",
-            name="Billy",
+            identifier="4",
+            name="Ray",
             config=AutognomeConfig(
                 initial_energy=10.0,
                 optimal_energy=7.0,
                 energy_depletion_rate=1.0,
-                energy_recovery_rate=1.0
+                energy_recovery_rate=1.0,
+                dark_fear_threshold=0.7,
+                light_confidence_boost=0.3
             )
         )
         run_autognome(autognome)

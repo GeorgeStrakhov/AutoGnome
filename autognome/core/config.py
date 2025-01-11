@@ -30,4 +30,17 @@ class AutognomeConfig(BaseModel):
         default=7.0,
         gt=0,
         description="Target energy level for the autognome"
+    )
+    # New emotional parameters
+    dark_fear_threshold: float = Field(
+        default=0.7,
+        ge=0,
+        le=1,
+        description="Probability of resting when in darkness"
+    )
+    light_confidence_boost: float = Field(
+        default=0.3,
+        ge=0,
+        le=1,
+        description="Additional probability of pulsing when in light"
     ) 
