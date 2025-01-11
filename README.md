@@ -9,4 +9,5 @@ A minimal approach to building self-referential systems, inspired by:
 ## AutoGnomes (AG)
 
  - [x] AG 1: Pulses "I exist" at regular intervals. Minimal self-assertion.
- - [ ] AG 2: Has a name and one state variable: energy level. After a pulse, energy level is reduced. When energy level reaches 0, the autognome stops.
+ - [x] AG 2: Has a name and one state variable: energy level. After a pulse, energy level is reduced. When energy level reaches 0, the autognome stops.
+ - [ ] AG 3: Sensor for monitoring its own energy level and ability to decide to rest or continue. Spending one pulse without saying anything is a rest.

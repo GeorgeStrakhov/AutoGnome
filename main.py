@@ -1,10 +1,8 @@
 import time
-from dataclasses import dataclass, field
 import signal
 import sys
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import ClassVar
 
 class AutognomeConfig(BaseModel):
     """Configuration for an autognome"""
@@ -17,13 +15,28 @@ class AutognomeConfig(BaseModel):
         default=True, 
         description="Whether to show timestamp in pulses"
     )
+    energy_depletion_rate: float = Field(
+        default=1.0,
+        gt=0,
+        description="Amount of energy depleted per pulse"
+    )
+    initial_energy: float = Field(
+        default=10.0,
+        gt=0,
+        description="Initial energy level for the autognome"
+    )
 
 class Autognome(BaseModel):
-    """The simplest possible autognome - a self-asserting pulse"""
+    """An autognome with energy level and name"""
     identifier: str = Field(
-        ...,  # Required field
+        ...,
         min_length=1, 
         description="Unique identifier for the autognome"
+    )
+    name: str = Field(
+        ...,
+        min_length=1,
+        description="The name of the autognome"
     )
     config: AutognomeConfig = Field(
         default_factory=AutognomeConfig,
@@ -34,16 +47,38 @@ class Autognome(BaseModel):
         ge=0,
         description="Number of pulses emitted"
     )
+    energy_level: float = Field(
+        ...,
+        ge=0,
+        description="Current energy level"
+    )
     running: bool = Field(
         default=True,
         description="Whether the autognome is currently running"
     )
 
+    def __init__(self, **data):
+        if 'energy_level' not in data:
+            data['energy_level'] = data.get('config', AutognomeConfig()).initial_energy
+        super().__init__(**data)
+
     def pulse(self) -> str:
-        """Generate one pulse of self-assertion"""
+        """Generate one pulse of self-assertion and deplete energy"""
+        if not self.running:
+            return f"Cannot pulse: {self.name} has stopped"
+            
         self.pulse_count += 1
-        timestamp = f"[{datetime.now().strftime('%H:%M:%S')}] " if self.config.show_timestamp else ""
-        return f"{timestamp}I am Autognome-{self.identifier}. I pulse, therefore I am. This is pulse number {self.pulse_count}"
+        self.energy_level -= self.config.energy_depletion_rate
+        
+        if self.energy_level <= 0:
+            self.energy_level = 0
+            self.stop()
+            message = f"I am {self.name} (AG-{self.identifier}). My energy is depleted. Shutting down..."
+        else:
+            timestamp = f"[{datetime.now().strftime('%H:%M:%S')}] " if self.config.show_timestamp else ""
+            message = f"{timestamp}I am {self.name} (AG-{self.identifier}). Energy level: {self.energy_level:.1f}. This is pulse number {self.pulse_count}"
+        
+        return message
     
     def stop(self) -> None:
         """Stop the autognome's pulsing"""
@@ -76,7 +111,11 @@ def run_autognome(auto: Autognome) -> None:
 
 if __name__ == "__main__":
     try:
-        autognome = Autognome(identifier="AG1")
+        autognome = Autognome(
+            identifier="AG2",
+            name="Energetic Eddie",
+            config=AutognomeConfig(initial_energy=10.0)
+        )
         
         while autognome.running:
             print(autognome.pulse())
