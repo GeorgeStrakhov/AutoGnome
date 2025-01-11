@@ -7,16 +7,15 @@ LightLevel = Literal["light", "dark"]
 
 class EnvironmentSensor:
     """Sensor for reading environmental conditions"""
-    def __init__(self):
+    def __init__(self, light_sensor_path: str = "data/light_sensor.txt"):
         # Get project root (parent of autognome package)
         self.project_root = Path(__file__).parent.parent.parent
-        self.data_dir = self.project_root / "data"
-        self.light_sensor_path = self.data_dir / "light_sensor.txt"
+        self.light_sensor_path = self.project_root / light_sensor_path
         self._ensure_sensor_exists()
     
     def _ensure_sensor_exists(self) -> None:
         """Ensure sensor file exists with default state"""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.light_sensor_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.light_sensor_path.exists():
             self.light_sensor_path.write_text("light")
     
