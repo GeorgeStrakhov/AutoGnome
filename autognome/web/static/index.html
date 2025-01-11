@@ -105,7 +105,7 @@
         function updateStatus(status) {
             // Update title
             document.getElementById('autognome-id').textContent = 
-                `(AG${status.identifier} - ${status.name})`;
+                `(${status.identifier} - ${status.name})`;
                 
             // Update other status fields
             document.getElementById('time').textContent = status.time;
@@ -137,7 +137,7 @@
                 // If this is the first status update, show a welcome message
                 if (!window.gotFirstStatus) {
                     window.gotFirstStatus = true;
-                    addMessage(`I am ${data.data.name} (AG${data.data.identifier}), and I am awake!`);
+                    addMessage(`I am ${data.data.name} (${data.data.identifier}), and I am awake!`);
                 }
             } else if (data.type === 'message') {
                 addMessage(data.data);
@@ -148,8 +148,21 @@
             addMessage('Connection established...', 'system');
         };
 
-        ws.onclose = function() {
-            addMessage('Connection closed', 'system');
+        ws.onclose = function(event) {
+            // Don't show error for normal closures
+            if (event.code === 1000 || event.code === 1001) {
+                addMessage('Connection closed normally', 'system');
+            } else {
+                addMessage(`Connection lost (${event.code}). Reconnecting in 3 seconds...`, 'system');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            }
+        };
+
+        ws.onerror = function(error) {
+            addMessage('WebSocket error occurred', 'system');
+            console.error('WebSocket error:', error);
         };
 
         // Form submission

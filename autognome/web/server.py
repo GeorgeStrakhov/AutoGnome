@@ -161,44 +161,68 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
             except asyncio.TimeoutError:
                 pass  # No message received, continue with status updates
+            except Exception as e:
+                # Check if this is a normal WebSocket closure
+                if isinstance(e, RuntimeError) and str(e).startswith(("(1000", "(1001")):
+                    break  # Silent for normal closures
+                elif not isinstance(e, (asyncio.CancelledError, RuntimeError)):
+                    print(f"Error handling message: {e}")
+                break
                 
             # Send status updates
-            if app.state.current_autognome:
-                # Get base status (even when sleeping)
-                status = app.state.current_autognome.get_status()
-                
-                # Only do actions and get messages if running
-                if app.state.current_autognome.running:
-                    message = app.state.current_autognome.act()
-                    # Add message to status if it's meaningful
-                    if message and message not in ["...", "*whimper*"]:
-                        await websocket.send_json({
-                            "type": "message",
-                            "data": message
-                        })
-                
-                # Add ASCII art from files based on state
-                auto = app.state.current_autognome
-                ascii_art = auto.config.display["ascii_art"]
-                base_dir = Path("data/autognomes") / auto.config.version
-                
-                if not auto.running:
-                    status["ascii_art"] = load_ascii_art(ascii_art["sleeping"], base_dir)
-                elif status["is_observing"]:
-                    status["ascii_art"] = load_ascii_art(ascii_art["thinking"], base_dir)
-                else:
-                    status["ascii_art"] = load_ascii_art(ascii_art[status["emotional_state"]], base_dir)
+            try:
+                if app.state.current_autognome:
+                    # Get base status (even when sleeping)
+                    status = app.state.current_autognome.get_status()
                     
-                # Send status update
-                await websocket.send_json({
-                    "type": "status",
-                    "data": status
-                })
-            await asyncio.sleep(1)
+                    # Only do actions and get messages if running
+                    if app.state.current_autognome.running:
+                        message = app.state.current_autognome.act()
+                        # Add message to status if it's meaningful
+                        if message and message not in ["...", "*whimper*"]:
+                            await websocket.send_json({
+                                "type": "message",
+                                "data": message
+                            })
+                    
+                    # Add ASCII art from files based on state
+                    auto = app.state.current_autognome
+                    ascii_art = auto.config.display["ascii_art"]
+                    base_dir = Path("data/autognomes") / auto.config.version
+                    
+                    if not auto.running:
+                        status["ascii_art"] = load_ascii_art(ascii_art["sleeping"], base_dir)
+                    elif status["is_observing"]:
+                        status["ascii_art"] = load_ascii_art(ascii_art["thinking"], base_dir)
+                    else:
+                        status["ascii_art"] = load_ascii_art(ascii_art[status["emotional_state"]], base_dir)
+                        
+                    # Send status update
+                    await websocket.send_json({
+                        "type": "status",
+                        "data": status
+                    })
+                await asyncio.sleep(1)
+            except Exception as e:
+                # Check if this is a normal WebSocket closure
+                if isinstance(e, RuntimeError) and str(e).startswith(("(1000", "(1001")):
+                    break  # Silent for normal closures
+                elif not isinstance(e, (asyncio.CancelledError, RuntimeError)):
+                    print(f"Error sending status update: {e}")
+                break
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        # Check if this is a normal WebSocket closure
+        if isinstance(e, RuntimeError) and str(e).startswith(("(1000", "(1001")):
+            pass  # Silent for normal closures
+        elif not isinstance(e, (asyncio.CancelledError, RuntimeError)):
+            print(f"WebSocket connection error: {e}")
     finally:
+        # Clean up connection
         app.state.websocket = None
+        try:
+            await websocket.close()
+        except:
+            pass  # Already closed
 
 @app.post("/api/command/{cmd}")
 async def handle_command(cmd: str):
