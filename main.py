@@ -71,6 +71,8 @@ def handle_shutdown(signum, frame):
     if auto:
         # First stop the autognome (this will store shutdown memory)
         auto.stop()
+        # Update mind state to sleeping
+        auto.mind_state = "sleeping"
         # Then display summary
         display_session_summary(auto)
         print("\nHibernation complete. Goodbye!")
@@ -88,6 +90,14 @@ def select_autognome() -> str:
     if not versions:
         print("No AG versions found in data/autognomes/")
         sys.exit(1)
+        
+    # If there's only one version, use it automatically
+    if len(versions) == 1:
+        version = versions[0]
+        config = loader.load_config(version)
+        if config:
+            print(f"\nStarting {config.name} ({version})...")
+            return version
         
     print("\nAvailable AutoGnomes:")
     for i, version in enumerate(versions, 1):

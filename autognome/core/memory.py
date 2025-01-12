@@ -17,10 +17,17 @@ class ShortTermMemory:
         self.events: deque[MemoryEvent] = deque(maxlen=capacity)
         self.last_state: Optional[str] = None
         self.last_transition_time: Optional[datetime] = None
+        self._last_record_time: Optional[datetime] = None
     
     def record_state(self, state: str, details: str = "") -> Optional[MemoryEvent]:
         """Record a state and return a transition event if state changed"""
         now = datetime.now()
+        
+        # Only record state changes at most once per second
+        if self._last_record_time and (now - self._last_record_time).total_seconds() < 1.0:
+            return None
+            
+        self._last_record_time = now
         
         # If this is a new state, record the transition
         if self.last_state is not None and state != self.last_state:

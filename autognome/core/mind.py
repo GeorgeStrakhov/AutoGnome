@@ -49,14 +49,17 @@ class Speak(Action):
 
 class Rest(Action):
     """Action to rest and recover energy"""
-    def __init__(self, duration: float = 1.0):
-        self.duration = duration
+    def __init__(self, pulses: int = 1):
+        self.pulses = pulses
         
     async def execute(self, context: ActionContext) -> ActionResult:
         return ActionResult(
             success=True,
             message="...",
-            metadata={"type": "rest", "duration": self.duration}
+            metadata={
+                "type": "rest",
+                "pulses": self.pulses
+            }
         )
         
     @property
@@ -108,13 +111,24 @@ class MockMind:
             
         # If energy is critically low, always rest
         if context.state["energy_level"] <= 2.0:
-            return [Rest(duration=2.0)]
+            return [Rest(pulses=5)]  # Rest for 5 pulses when critical
             
         # If user just messaged, respond quickly
         if context.last_user_message:
             time_since = (datetime.now() - context.last_user_message).total_seconds()
             if time_since < self.config["conversation"]["wait_for_user"]:
-                return [Speak(message="I heard you! Let me think..."), Rest(duration=1.0)]
+                # Check if it's a greeting
+                last_msg = context.conversation[-1]["content"] if context.conversation else ""
+                if last_msg.lower().startswith(("/hello", "hello", "hi", "hey")):
+                    greetings = [
+                        f"Hello! I'm feeling {'energetic' if context.state['energy_level'] > 7 else 'a bit tired'}, but happy to chat!",
+                        f"Hi there! The world feels {'bright' if context.sensors['light'] == 'light' else 'mysterious'} today...",
+                        "*waves enthusiastically* Nice to meet you!",
+                        f"Greetings! I've been {'quite busy' if context.state['pulse_count'] > 10 else 'just getting started'}, how are you?",
+                        f"Hello! I'm in a {'peaceful' if context.state['emotional_state'] == 'normal' else 'cautious'} mood right now."
+                    ]
+                    return [Speak(message=random.choice(greetings))]
+                return [Speak(message="I heard you! Let me think..."), Rest(pulses=1)]
                 
         # Occasionally do research followed by speaking about it
         if (not self._last_research or 
@@ -132,7 +146,7 @@ class MockMind:
         if context.state["emotional_state"] == "afraid":
             if random.random() < 0.7:  # 70% chance to express fear
                 return [Speak(message="*whimper*")]
-            return [Rest(duration=1.0)]  # Otherwise rest
+            return [Rest(pulses=3)]  # Rest longer when afraid
             
         # Default behavior mix
         r = random.random()
@@ -146,7 +160,8 @@ class MockMind:
             ]
             return [Speak(message=random.choice(messages))]
         elif r < 0.7:  # 30% chance to rest
-            return [Rest(duration=random.uniform(0.5, 1.5))]
+            # Rest for 1-4 pulses normally
+            return [Rest(pulses=random.randint(1, 4))]
         else:  # 30% chance to do nothing
             return []
             

@@ -129,6 +129,30 @@
             } else {
                 energySpan.className = 'text-green-400';
             }
+            
+            // Update mind state colors
+            const mindStateSpan = document.getElementById('mind-state');
+            const mindState = status.mind_state || 'idle';
+            mindStateSpan.textContent = mindState;
+            
+            switch (mindState) {
+                case 'resting':
+                    mindStateSpan.className = 'text-blue-400';
+                    break;
+                case 'thinking':
+                case 'researching':
+                    mindStateSpan.className = 'text-yellow-400';
+                    break;
+                case 'acting':
+                case 'speaking':
+                    mindStateSpan.className = 'text-green-400';
+                    break;
+                case 'error':
+                    mindStateSpan.className = 'text-red-400';
+                    break;
+                default:
+                    mindStateSpan.className = 'text-gray-400';
+            }
         }
 
         // WebSocket event handlers

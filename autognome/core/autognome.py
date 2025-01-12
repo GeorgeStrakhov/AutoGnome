@@ -3,13 +3,16 @@ from pathlib import Path
 from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, Field, PrivateAttr
 import asyncio
+import logging
 
 from .loader import AutognomeConfig
 from .memory import ShortTermMemory
 from ..environment.sensor import EnvironmentSensor, LightLevel
 from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
 from .state_store import StateStore, JsonStateStore, PersistentState
-from .mind import MockMind, ActionContext, Action, ActionResult
+from .mind import MockMind, ActionContext, Action, ActionResult, Rest
+
+logger = logging.getLogger(__name__)
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
@@ -43,6 +46,11 @@ class Autognome(BaseModel):
     mind_state: str = Field(
         default="idle",
         description="Current state of the mind"
+    )
+    remaining_rest_pulses: int = Field(
+        default=0,
+        ge=0,
+        description="Number of pulses left to rest"
     )
     
     # Private attributes not included in serialization
@@ -144,88 +152,102 @@ class Autognome(BaseModel):
             last_user_message=self._last_user_message
         )
 
+    def _process_observation(self, had_transition: bool = False) -> Optional[str]:
+        """Centralized observation processing.
+        Returns a message if there's a new observation to report."""
+        observation = None
+        
+        # First check transition-based observations
+        if had_transition:
+            patterns = self._short_term_memory.analyze_patterns()
+            transitions = patterns["transitions_last_minute"]
+            if transitions > 5:
+                observation = f"The light is changing so quickly! {transitions} times in the last minute!"
+            elif transitions > 0:
+                observation = f"The light changed {transitions} times in the last minute."
+        
+        # Then check time-based observations
+        if not observation:  # Only if we don't have a transition observation
+            patterns = self._short_term_memory.analyze_patterns()
+            duration = patterns["current_state_duration"]
+            current_state = self._short_term_memory.last_state or "unknown"
+            
+            if 59 < duration < 61:  # Just reached 1 minute
+                observation = f"It's been {current_state} for a minute now..."
+            elif 299 < duration < 301:  # Just reached 5 minutes
+                observation = f"It's been {current_state} for quite a while now... ({int(duration/60)} minutes)"
+        
+        # Store and return if we have a new observation
+        if observation and observation != self._last_observation:
+            self._store_memory("observation", observation)
+            self._last_observation = observation
+            return observation
+            
+        return None
+
     async def act(self) -> Optional[str]:
-        """Perform one action cycle based on current state"""
-        if not self.running:
-            return None
-            
-        # Update pulse count and check energy
+        """Perform one pulse of activity."""
+        # Increment pulse count at start of each pulse
         self.pulse_count += 1
-        if self.pulse_count % 10 == 0:
-            self._save_state()
-            
+        
+        # If we're still resting, continue resting
+        if self.remaining_rest_pulses > 0:
+            self._recover_energy()
+            self.remaining_rest_pulses -= 1
+            self.mind_state = "resting"
+            return None
+
         # Build context for mind
         context = self._build_context()
         
+        # Think and get actions
         try:
-            # Think phase
-            self.mind_state = "thinking"
-            actions = await asyncio.wait_for(
-                self._mind.think(context),
-                timeout=self.config.mind["think_timeout"]
-            )
-        except asyncio.TimeoutError:
-            self._store_memory("warning", "Mind took too long to think")
-            actions = []
-        except Exception as e:
-            self._store_memory("error", f"Mind error during thinking: {e}")
-            actions = []
+            actions = await self._mind.think(context)
+            self.mind_state = "acting"
+            self._current_actions = actions
             
-        # Store actions for status display
-        self._current_actions = actions
-        
-        # Execute actions
-        results = []
-        message = None
-        
-        for action in actions:
-            try:
-                self.mind_state = action.display_state
+            # Execute actions
+            message = None
+            for action in actions:
                 result = await action.execute(context)
-                results.append(result)
+                if not result.success:
+                    logger.error(f"Action failed: {result.message}")
+                    continue
+                    
+                # Handle rest actions specially
+                if isinstance(action, Rest):
+                    self.remaining_rest_pulses = action.pulses - 1  # -1 since we're using this pulse
+                    self._recover_energy()
+                    self.mind_state = "resting"
+                    self.rest_count += 1  # Increment rest count
+                    return "Taking a rest..."
                 
-                # Update state based on action type
-                if result.metadata["type"] == "speak":
+                # Store messages from speak actions
+                if result.metadata.get("type") == "speak":
                     message = result.message
                     self._conversation_history.append({
                         "role": "assistant",
                         "content": message,
                         "timestamp": datetime.now()
                     })
-                elif result.metadata["type"] == "rest":
-                    self.energy_level = min(
-                        self.config.core["initial_energy"],
-                        self.energy_level + self.config.core["energy_recovery_rate"]
-                    )
                     
+            # Reflect on actions
+            try:
+                await self._mind.reflect(context, actions)
             except Exception as e:
-                self._store_memory("error", f"Action execution error: {e}")
-                results.append(ActionResult(
-                    success=False,
-                    message=str(e),
-                    metadata={"type": "error"}
-                ))
-                
-        # Always consume some energy
-        self.energy_level -= self.config.core["energy_depletion_rate"]
-        if self.energy_level <= 0:
-            self.energy_level = 0
-            self._store_memory("energy_critical", "Energy completely depleted!")
-            self.stop()
-            return "My energy is depleted. Shutting down..."
+                logger.exception("Error in mind reflection")
+                # Don't change mind state or return error - just log it
             
-        # Reflect phase
-        try:
-            self.mind_state = "reflecting"
-            await asyncio.wait_for(
-                self._mind.reflect(context, results),
-                timeout=self.config.mind["reflect_timeout"]
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            self._store_memory("warning", f"Reflection error: {e}")
+            return message
             
-        self.mind_state = "idle"
-        return message
+        except Exception as e:
+            logger.exception("Error in mind processing")
+            self.mind_state = "error"
+            return f"Error: {str(e)}"
+            
+        # If we got here, we did work this pulse
+        self._deplete_energy()
+        self._save_state()
 
     def record_user_message(self, message: str) -> None:
         """Record a message from the user"""
@@ -239,14 +261,12 @@ class Autognome(BaseModel):
     def get_status(self) -> dict:
         """Get the current status of the autognome"""
         # First get environment and update emotional state
-        light_level = self.sense_environment()
+        light_level, had_transition = self.sense_environment()
         self.update_emotional_state(light_level)
         
-        # Then check for observations
-        observation = self.get_observation()
-        # Only observing if we have a NEW observation to make
-        is_observing = bool(observation) and observation != self._last_observation
-        self._last_observation = observation
+        # Process any observations
+        observation = self._process_observation(had_transition)
+        is_observing = bool(observation)
         
         return {
             "time": datetime.now().strftime('%H:%M:%S'),
@@ -261,7 +281,8 @@ class Autognome(BaseModel):
             "emotional_state": self.emotional_state,
             "is_observing": is_observing,
             "mind_state": self.mind_state,
-            "ascii_art": self._get_ascii_art(is_observing)
+            "ascii_art": self._get_ascii_art(is_observing),
+            "observation": observation  # Include any observation message
         }
 
     def _get_ascii_art(self, is_observing: bool) -> str:
@@ -325,38 +346,19 @@ class Autognome(BaseModel):
             return True, "energy_warning"
         return False, ""
 
-    def sense_environment(self) -> LightLevel:
-        """Read the current light level and record it in memory"""
+    def sense_environment(self) -> tuple[LightLevel, bool]:
+        """Read the current light level and record it in memory.
+        Returns (level, had_transition)"""
         level = self._sensor.read_light_level()
-        event = self._short_term_memory.record_state(level)
-        return level
-
-    def get_observation(self) -> str:
-        """Generate an observation about environmental patterns"""
-        patterns = self._short_term_memory.analyze_patterns()
-        duration = patterns["current_state_duration"]
-        current_state = self._short_term_memory.last_state or "unknown"
-        
-        observation = ""
-        # Comment on state duration
-        if duration > 300:  # 5 minutes
-            observation = f"It's been {current_state} for quite a while now... ({int(duration/60)} minutes)"
-        elif duration > 60:  # 1 minute
-            observation = f"It's been {current_state} for a minute now..."
-        
-        # Comment on frequent changes
-        transitions = patterns["transitions_last_minute"]
-        if transitions > 5:
-            observation = f"The light is changing so quickly! {transitions} times in the last minute!"
-        elif transitions > 0:
-            observation = f"The light changed {transitions} times in the last minute."
-        
-        # Only store significant observations that are different from last one
-        if observation and observation != self._last_observation:
-            self._store_memory("observation", observation)
-            self._last_observation = observation
-            
-        return observation
+        # Record state with more details
+        event = self._short_term_memory.record_state(
+            level,
+            f"Light level is {level} at energy {self.energy_level:.1f}"
+        )
+        # If there was a transition, store it in long-term memory too
+        if event:
+            self._store_memory("light_change", event.details)
+        return level, bool(event)
 
     def _store_memory(self, event_type: str, observation: str) -> None:
         """Store a new long-term memory"""
@@ -407,76 +409,6 @@ class Autognome(BaseModel):
             return "low"
         return "optimal"
 
-    def decide_action(self) -> str:
-        """Decide whether to pulse or rest based on energy and emotional state"""
-        # Base decision on energy state
-        energy_state = self.sense_energy_state()
-        if energy_state == "high":
-            base_pulse_chance = 0.8
-        elif energy_state == "low":
-            base_pulse_chance = 0.2
-        else:
-            base_pulse_chance = 0.5
-
-        # Modify decision based on emotional state
-        if self.emotional_state == "afraid":
-            base_pulse_chance *= (1 - self.config.core["dark_fear_threshold"])
-        else:
-            base_pulse_chance += self.config.core["light_confidence_boost"]
-
-        # Make final decision
-        return "pulse" if base_pulse_chance > 0.5 else "rest"
-
-    def start_rest(self) -> None:
-        """Force the autognome to take a rest"""
-        if not self.running:
-            return
-        self._store_memory("command", "Taking a moment to rest...")
-        self.rest()
-
-    def rest(self) -> str:
-        """Rest during a pulse cycle"""
-        if not self.running:
-            return "Cannot pulse: I have stopped"
-            
-        self.pulse_count += 1
-        self.rest_count += 1
-        self.energy_level = min(
-            self.config.core["initial_energy"],
-            self.energy_level + self.config.core["energy_recovery_rate"]
-        )
-        
-        light_level = self.sense_environment()
-        observation = self.get_observation()
-        if observation:
-            return observation
-            
-        expressions = self.config.personality["expressions"]["normal"]
-        return expressions["rest_light"] if light_level == "light" else expressions["rest_dark"]
-
-    def pulse(self) -> str:
-        """Active pulse with self-assertion"""
-        if not self.running:
-            return "Cannot pulse: I have stopped"
-            
-        self.pulse_count += 1
-        self.energy_level -= self.config.core["energy_depletion_rate"]
-        
-        if self.energy_level <= 0:
-            self.energy_level = 0
-            # Store critical energy memory before shutdown
-            self._store_memory("energy_critical", "Energy completely depleted!")
-            self.stop()  # This will store the shutdown memory
-            return "My energy is depleted. Shutting down..."
-        
-        light_level = self.sense_environment()
-        observation = self.get_observation()
-        if observation:
-            return observation
-            
-        expressions = self.config.personality["expressions"]["normal"]
-        return expressions["light"] if light_level == "light" else expressions["dark"]
-
     def stop(self) -> None:
         """Stop the autognome's pulsing and save state"""
         if not hasattr(self, '_has_shutdown'):  # Only store shutdown memory once
@@ -485,5 +417,22 @@ class Autognome(BaseModel):
                 f"Going to sleep... Final energy: {self.energy_level:.1f}"
             )
             self._save_state()  # Save state before shutting down
+            self.mind_state = "sleeping"
             self._has_shutdown = True
         self.running = False 
+
+    def _recover_energy(self) -> None:
+        """Recover energy during rest."""
+        recovery = self.config.core["energy_recovery_rate"]
+        max_energy = self.config.core["optimal_energy"] * 1.5
+        self.energy_level = min(
+            self.energy_level + recovery,
+            max_energy
+        )
+        
+    def _deplete_energy(self) -> None:
+        """Deplete energy when doing work."""
+        self.energy_level = max(
+            0.0,
+            self.energy_level - self.config.core["energy_depletion_rate"]
+        ) 

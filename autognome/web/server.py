@@ -2,10 +2,15 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional, Dict
 from ..core.autognome import Autognome
 from ..core.loader import AutognomeLoader
+from ..core.mind import Speak, Rest
+import random
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -99,34 +104,57 @@ async def pulse_loop():
     try:
         while True:
             if app.state.current_autognome and app.state.current_autognome.running:
-                # Get action result
-                message = await app.state.current_autognome.act()
+                auto = app.state.current_autognome
                 
-                # Send status update
-                if app.state.websocket:
-                    await app.state.websocket.send_json({
-                        "type": "status",
-                        "data": app.state.current_autognome.get_status()
-                    })
+                try:
+                    # Get action result
+                    message = await auto.act()
                     
-                    # Send message if any
-                    if message:
+                    # Get status and check for observations
+                    if app.state.websocket:
+                        status = auto.get_status()
+                        
+                        # Send status update
                         await app.state.websocket.send_json({
-                            "type": "message",
-                            "data": message
+                            "type": "status",
+                            "data": status
                         })
                         
+                        # Send observation message if any
+                        if status.get("observation"):
+                            await app.state.websocket.send_json({
+                                "type": "message",
+                                "data": status["observation"]
+                            })
+                        
+                        # Send action message if any
+                        if message:
+                            await app.state.websocket.send_json({
+                                "type": "message",
+                                "data": message
+                            })
+                except Exception as e:
+                    logger.exception("Error in pulse loop iteration")
+                    if app.state.websocket:
+                        try:
+                            await app.state.websocket.send_json({
+                                "type": "message",
+                                "data": f"Error: {str(e)}"
+                            })
+                        except:
+                            pass
+                            
             await asyncio.sleep(1.0)  # Fixed pulse frequency
     except asyncio.CancelledError:
         # Clean shutdown
         raise
     except Exception as e:
-        print(f"Error in pulse loop: {e}")
+        logger.exception("Fatal error in pulse loop")
         if app.state.websocket:
             try:
                 await app.state.websocket.send_json({
                     "type": "message",
-                    "data": f"Error: {e}"
+                    "data": f"Fatal error: {str(e)}"
                 })
             except:
                 pass
@@ -157,9 +185,39 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "message",
                             "data": f"Light level changed to {new_level}."
                         })
+                    elif cmd == "hello":
+                        # Let the mind handle the greeting
+                        context = auto._build_context()
+                        actions = await auto._mind.think(context)
+                        
+                        # Execute first speak action if any
+                        for action in actions:
+                            if isinstance(action, Speak):
+                                result = await action.execute(context)
+                                if result.success:
+                                    await websocket.send_json({
+                                        "type": "message",
+                                        "data": result.message
+                                    })
+                                    break
+                        else:  # No speak action found
+                            await websocket.send_json({
+                                "type": "message",
+                                "data": f"Hello! I am {auto.config.name}!"
+                            })
                     elif cmd == "rest":
                         if auto.running:
-                            auto.start_rest()
+                            # Let the mind handle resting
+                            context = auto._build_context()
+                            actions = [Rest(pulses=3)]  # Force a rest action
+                            for action in actions:
+                                result = await action.execute(context)
+                                if result.success:
+                                    await websocket.send_json({
+                                        "type": "message",
+                                        "data": "Taking a moment to rest..."
+                                    })
+                                    break
                         else:
                             await websocket.send_json({
                                 "type": "message",
