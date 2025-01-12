@@ -32,8 +32,15 @@ ENV/
 *.bak
 
 # Project specific
-data/
+data/*
+!data/
+!data/**/*.yaml
 !data/.gitkeep
+!data/autognomes/
+data/autognomes/**/*.json
+data/autognomes/**/*.jsonl
+!data/autognomes/**/ascii_art/*.txt
+!data/autognomes/**/*.yaml
 
 # AutoGnome memory storage
 memory/

@@ -49,7 +49,7 @@ To go to a certain generation, use `git checkout AG1` or `git checkout AG2` etc.
  - [x] AG-7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
  - [x] AG-8: Console input sensor and basic interaction. Can receive and respond to simple text commands from the user (like "hello", "status", "rest", "help"). First step towards two-way communication and environmental awareness beyond light/dark. Also we have to migrate away from the lovely console to a web interface with websockets, because console can't handle simultaneously displaying live info and user input.
  - [x] AG-9: Basic language model integration. Can engage in more natural conversations, express its thoughts about its state and experiences, and remember conversation context. First step towards more sophisticated self-awareness and reasoning.
- - [ ] AG-10: Separation of behavior model from the speaking mind. The behavior model decides what to do (speak being one of the options) and then if speaking is an appropriate action - language center is called into action. Separate reflection step to decide which memories to form and how to edit state and goal for later.
+ - [ ] AG-10: Separation of behavior model from the speaking mind - because otherwise there is context overload. The behavior model decides what to do (speak being one of the options) and then if speaking is an appropriate action - language center is called into action. Separate reflection step to decide which memories to form and how to edit state and goal for later.
 
 
 ## Architecture
