@@ -2,6 +2,8 @@ from pathlib import Path
 import yaml
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+from loguru import logger
+from litellm import supports_function_calling
 
 @dataclass
 class AutognomeConfig:
@@ -26,16 +28,29 @@ class AutognomeLoader:
         """Get list of available AG versions"""
         return [d.name for d in self.data_dir.iterdir() if d.is_dir()]
         
-    def load_config(self, version: str) -> Optional[AutognomeConfig]:
-        """Load configuration for a specific AG version"""
-        config_path = self.data_dir / version / "ag.yaml"
-        if not config_path.exists():
+    @staticmethod
+    def load_config(version: str) -> AutognomeConfig:
+        """Load configuration for the specified version"""
+        config_path = Path("data/autognomes") / version / "ag.yaml"
+        
+        try:
+            with open(config_path) as f:
+                config_data = yaml.safe_load(f)
+                
+            # Check if using LLM and validate function call support
+            if config_data.get("mind", {}).get("type") == "llm":
+                model = config_data["mind"]["model"]
+                if not supports_function_calling(model):
+                    raise ValueError(
+                        f"Model {model} does not support function calling. "
+                        "Please use a model that supports function calling or use mock mind type."
+                    )
+                
+            return AutognomeConfig(**config_data)
+            
+        except Exception as e:
+            logger.error(f"Error loading config from {config_path}: {e}")
             return None
-            
-        with open(config_path) as f:
-            config_data = yaml.safe_load(f)
-            
-        return AutognomeConfig(**config_data)
         
     def get_state_path(self, version: str) -> Path:
         """Get path to state file for version"""

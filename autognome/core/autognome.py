@@ -11,6 +11,7 @@ from ..environment.sensor import EnvironmentSensor, LightLevel
 from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
 from .state_store import StateStore, JsonStateStore, PersistentState
 from .mind import MockMind, ActionContext, Action, ActionResult, Rest
+from .llm_mind import LLMMind
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
@@ -87,6 +88,8 @@ class Autognome(BaseModel):
         # Initialize mind based on config
         if self.config.mind["type"] == "mock":
             self._mind = MockMind(self.config.mind)
+        elif self.config.mind["type"] == "llm":
+            self._mind = LLMMind(self.config.mind)
         else:
             raise ValueError(f"Unknown mind type: {self.config.mind['type']}")
         
@@ -267,7 +270,6 @@ class Autognome(BaseModel):
         is_observing = bool(observation)
         
         return {
-            "time": datetime.now().strftime('%H:%M:%S'),
             "state": "active",
             "display_state": self.emotional_state,
             "energy": self.energy_level,

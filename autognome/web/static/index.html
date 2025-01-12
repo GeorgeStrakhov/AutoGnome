@@ -90,6 +90,12 @@
         const asciiArt = document.getElementById('ascii-art');
         const energySpan = document.getElementById('energy');
         const stateSpan = document.getElementById('state');
+        const timeSpan = document.getElementById('time');
+
+        // Update time every second
+        setInterval(() => {
+            timeSpan.textContent = new Date().toLocaleTimeString();
+        }, 1000);
 
         // Add message to chat
         function addMessage(text, type = 'autognome') {
@@ -108,8 +114,7 @@
             document.getElementById('autognome-id').textContent = 
                 `(${status.identifier} - ${status.name})`;
                 
-            // Update other status fields
-            document.getElementById('time').textContent = status.time;
+            // Update other status fields (excluding time which is handled separately)
             document.getElementById('display-state').textContent = status.display_state;
             document.getElementById('energy').textContent = status.energy.toFixed(1);
             document.getElementById('state').textContent = status.state;

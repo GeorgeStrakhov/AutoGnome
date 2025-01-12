@@ -2,7 +2,7 @@
 
 _(αὐτός (autos) for self, γνῶσις (gnosis) for knowledge)_
 
-A a live-learning and ultra-minimalistic approach to building tiny self-aware digital organisms, inspired by:
+Building tiny self-aware digital organisms, in public, inspired by:
 
 1. Braitenberg's Vehicles - Simple units with emergent complex behavior
 2. Hofstadter's Strange Loops - Self-reference as basis for consciousness
@@ -40,15 +40,16 @@ To go to a certain generation, use `git checkout AG1` or `git checkout AG2` etc.
 
 ### Evolution tracking:
 
- - [x] AG 1: Pulses "I exist" at regular intervals. Minimal self-assertion.
- - [x] AG 2: Has a name and one state variable: energy level. After a pulse, energy level is reduced. When energy level reaches 0, the autognome stops.
- - [x] AG 3: Sensor for monitoring its own energy level and ability to decide to rest or continue. Spending one pulse without saying anything is a rest.
- - [x] AG 4: Simple environmental sensor (light/dark) through checking a file. Develops fear of the dark: rests more frequently in darkness, pulses more in light. First emotional response to environment.
- - [x] AG 5: Short-term memory and basic pattern recognition. Remembers its last few experiences (light/dark transitions) and starts to anticipate changes. Can say things like "The light changed 3 times in the last minute" or "It's been dark for a while now...". Also facial expression changes depending on the emotional state, just for the fun of it.
- - [x] AG 6: Long-term persistent memory (currently jsonl, but in the future will be vector storage)
- - [x] AG 7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
- - [x] AG 8: Console input sensor and basic interaction. Can receive and respond to simple text commands from the user (like "hello", "status", "rest", "help"). First step towards two-way communication and environmental awareness beyond light/dark. Also we have to migrate away from the lovely console to a web interface with websockets, because console can't handle simultaneously displaying live info and user input.
- - [ ] AG 9: Basic language model integration. Can engage in more natural conversations, express its thoughts about its state and experiences, and remember conversation context. First step towards more sophisticated self-awareness and reasoning.
+ - [x] AG-1: Pulses "I exist" at regular intervals. Minimal self-assertion.
+ - [x] AG-2: Has a name and one state variable: energy level. After a pulse, energy level is reduced. When energy level reaches 0, the autognome stops.
+ - [x] AG-3: Sensor for monitoring its own energy level and ability to decide to rest or continue. Spending one pulse without saying anything is a rest.
+ - [x] AG-4: Simple environmental sensor (light/dark) through checking a file. Develops fear of the dark: rests more frequently in darkness, pulses more in light. First emotional response to environment.
+ - [x] AG-5: Short-term memory and basic pattern recognition. Remembers its last few experiences (light/dark transitions) and starts to anticipate changes. Can say things like "The light changed 3 times in the last minute" or "It's been dark for a while now...". Also facial expression changes depending on the emotional state, just for the fun of it.
+ - [x] AG-6: Long-term persistent memory (currently jsonl, but in the future will be vector storage)
+ - [x] AG-7: Persistent state across sessions. Stores energy level, emotional state, and other vital stats in a state file. When restarted, it remembers its previous state and continues from there.
+ - [x] AG-8: Console input sensor and basic interaction. Can receive and respond to simple text commands from the user (like "hello", "status", "rest", "help"). First step towards two-way communication and environmental awareness beyond light/dark. Also we have to migrate away from the lovely console to a web interface with websockets, because console can't handle simultaneously displaying live info and user input.
+ - [x] AG-9: Basic language model integration. Can engage in more natural conversations, express its thoughts about its state and experiences, and remember conversation context. First step towards more sophisticated self-awareness and reasoning.
+ - [ ] AG-10: Separation of behavior model from the speaking mind. The behavior model decides what to do (speak being one of the options) and then if speaking is an appropriate action - language center is called into action. Separate reflection step to decide which memories to form and how to edit state and goal for later.
 
 
 ## Architecture
@@ -90,22 +91,29 @@ The AutoGnome is built with these main parts:
 
 The code is organized in:
 
-```
-autognome/
-  core/           # Main logic
-    mind.py       # Mind protocol and implementations
-    memory.py     # Short-term memory
-    autognome.py  # Main class
-    config.py     # Config loading
-    loader.py     # AG version loading
-  web/           # Web interface
-    server.py     # FastAPI server
-    static/      # Frontend files
-  environment/   # Sensors
-    sensor.py    # Sensor implementations
-  data/          # Data storage
-    autognomes/  # AG data - for each AG there is a folder with its data, including ag.yaml config, memories.jsonl, state.json and ascii_art/ folder with its current ascii art for different emotional states
-```
+autognome/                # Root directory
+├── main.py              # Entry file
+├── core/                # Main logic
+│   ├── config.py        # Config loading
+│   ├── loader.py        # AG version loading 
+│   ├── mind.py          # Mind protocol and implementations
+│   ├── llm_mind.py      # LLM-powered mind
+│   ├── memory.py        # Short-term memory
+│   ├── long_term_memory.py  # Long-term memory
+│   ├── autognome.py     # Main class
+│   └── state_store.py   # State management
+├── web/                 # Web interface
+│   ├── server.py        # FastAPI server
+│   └── static/          # Frontend files
+├── environment/         # Sensors
+│   └── sensor.py        # Sensor implementations
+└── data/                # Data storage
+    └── autognomes/      # AG data
+        └── AG{n}/       # Individual AG folders containing:
+            ├── ag.yaml      # Config file
+            ├── memories.jsonl  # Memory storage
+            ├── state.json   # Current state
+            └── ascii_art/   # ASCII art for emotional states
 
 ## Running the project
 

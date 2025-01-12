@@ -142,7 +142,8 @@ async def pulse_loop():
                         except:
                             pass
                             
-            await asyncio.sleep(1.0)  # Fixed pulse frequency
+            # Use configured pulse frequency from core config
+            await asyncio.sleep(auto.config.core["pulse_frequency"] if auto else 1.0)
     except asyncio.CancelledError:
         # Clean shutdown
         raise
