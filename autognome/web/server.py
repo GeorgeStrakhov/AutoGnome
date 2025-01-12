@@ -2,15 +2,13 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import asyncio
-import logging
+from loguru import logger
 from pathlib import Path
 from typing import Optional, Dict
 from ..core.autognome import Autognome
 from ..core.loader import AutognomeLoader
 from ..core.mind import Speak, Rest
 import random
-
-logger = logging.getLogger(__name__)
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")

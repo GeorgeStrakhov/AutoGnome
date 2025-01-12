@@ -5,10 +5,27 @@ import webbrowser
 import threading
 import time
 from datetime import timedelta
+from loguru import logger
 from autognome.web.server import app, pulse_loop
 from autognome.core.loader import AutognomeLoader
 from autognome.core.autognome import Autognome
 import asyncio
+
+# Configure loguru
+logger.remove()  # Remove default handler
+logger.add(
+    sys.stdout,
+    colorize=True,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO"
+)
+logger.add(
+    "autognome.log",
+    rotation="1 day",
+    retention="7 days",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+    level="DEBUG"
+)
 
 def format_duration(seconds: float) -> str:
     """Format duration in seconds to a human readable string"""

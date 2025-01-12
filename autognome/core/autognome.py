@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, Field, PrivateAttr
 import asyncio
-import logging
+from loguru import logger
 
 from .loader import AutognomeConfig
 from .memory import ShortTermMemory
@@ -11,8 +11,6 @@ from ..environment.sensor import EnvironmentSensor, LightLevel
 from .long_term_memory import LongTermMemoryStore, JsonlMemoryStore, LongTermMemory
 from .state_store import StateStore, JsonStateStore, PersistentState
 from .mind import MockMind, ActionContext, Action, ActionResult, Rest
-
-logger = logging.getLogger(__name__)
 
 class Autognome(BaseModel):
     """An autognome with energy management, emotional responses, and memory"""
