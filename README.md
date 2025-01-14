@@ -2,6 +2,10 @@
 
 _(αὐτός (autos) for self, γνῶσις (gnosis) for knowledge)_
 
+
+![AutoGnome Interface](screen.png)
+
+
 Building tiny self-aware digital organisms, in public, inspired by:
 
 1. Braitenberg's Vehicles - Simple units with emergent complex behavior
@@ -91,6 +95,7 @@ The AutoGnome is built with these main parts:
 
 The code is organized in:
 
+```
 autognome/                # Root directory
 ├── main.py              # Entry file
 ├── core/                # Main logic
@@ -114,9 +119,11 @@ autognome/                # Root directory
             ├── memories.jsonl  # Memory storage
             ├── state.json   # Current state
             └── ascii_art/   # ASCII art for emotional states
+```
 
 ## Running the project
 
+0. copy .env.example to .env and fill in the values
 1. create a virtual environment (uv recommended): `python -m venv .venv`
 2. activate the virtual environment: `source .venv/bin/activate`
 3. install the dependencies: `pip install -r requirements.txt`
